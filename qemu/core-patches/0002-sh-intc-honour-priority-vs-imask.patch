@@ -1,0 +1,135 @@
+Subject: [PATCH 0002] sh_intc: deliver by priority against IMASK
+
+Upstream sh_intc_get_pending_vector returns the first pending source and
+ignores priorities.  The SH-4 takes an interrupt only when its priority is
+greater than SR.IMASK, and the highest-priority pending source first, so
+keep each source's priority (from its IPR field, or the IRL level) and pick
+by it.  A priority field that changes between two non-zero levels only
+updates the priority; the source stays enabled.
+
+--- a/hw/intc/sh_intc.c
++++ b/hw/intc/sh_intc.c
+@@ -80,23 +80,37 @@
+ int sh_intc_get_pending_vector(struct intc_desc *desc, int imask)
+ {
+     unsigned int i;
++    int best = -1;
++    int best_prio = -1;
+ 
+     /* slow: use a linked lists of pending sources instead */
+-    /* wrong: take interrupt priority into account (one list per priority) */
++    /*
++     * SH-4 takes an interrupt only when its priority is strictly greater
++     * than the CPU's current IMASK level; pick the highest-priority pending
++     * source instead of the first one.
++     */
+ 
+-    if (imask == 0x0f) {
+-        return -1; /* FIXME, update code to include priority per source */
+-    }
+-
+     for (i = 0; i < desc->nr_sources; i++) {
+         struct intc_source *source = &desc->sources[i];
+ 
+-        if (source->pending) {
+-            trace_sh_intc_pending(desc->pending, source->vect);
+-            return source->vect;
++        if (!source->pending || !source->vect) {
++            continue;
+         }
++        if (source->prio <= imask) {
++            continue;
++        }
++        if (best < 0 || source->prio > best_prio) {
++            best = i;
++            best_prio = source->prio;
++        }
+     }
+-    g_assert_not_reached();
++
++    if (best < 0) {
++        return -1;
++    }
++
++    trace_sh_intc_pending(desc->pending, desc->sources[best].vect);
++    return desc->sources[best].vect;
+ }
+ 
+ typedef enum {
+@@ -168,8 +182,12 @@
+     g_assert_not_reached();
+ }
+ 
++/*
++ * enable_adj is +1 (enabled), -1 (disabled) or 0 (the source stays enabled
++ * and only its priority changes); prio < 0 leaves the priority alone.
++ */
+ static void sh_intc_toggle_mask(struct intc_desc *desc, intc_enum id,
+-                                int enable, int is_group)
++                                int enable_adj, int is_group, int prio)
+ {
+     struct intc_source *source = &desc->sources[id];
+ 
+@@ -183,15 +201,18 @@
+     }
+ 
+     if (source->vect) {
+-        sh_intc_toggle_source(source, enable ? 1 : -1, 0);
++        if (prio >= 0) {
++            source->prio = prio;
++        }
++        sh_intc_toggle_source(source, enable_adj, 0);
+     }
+ 
+     if ((is_group || !source->vect) && source->next_enum_id) {
+-        sh_intc_toggle_mask(desc, source->next_enum_id, enable, 1);
++        sh_intc_toggle_mask(desc, source->next_enum_id, enable_adj, 1, prio);
+     }
+ 
+     if (!source->vect) {
+-        trace_sh_intc_set(id, !!enable);
++        trace_sh_intc_set(id, enable_adj > 0);
+     }
+ }
+ 
+@@ -239,11 +260,21 @@
+     }
+ 
+     for (k = 0; k <= first; k++) {
++        int prio = -1;
++
+         mask = (1 << width) - 1;
+         mask <<= (first - k) * width;
+ 
+         if ((*valuep & mask) != (value & mask)) {
+-            sh_intc_toggle_mask(desc, enum_ids[k], value & mask, 0);
++            int was = (*valuep & mask) != 0;
++            int now = (value & mask) != 0;
++
++            if (mode & INTC_MODE_IS_PRIO) {
++                prio = (value & mask) >> ((first - k) * width);
++            }
++            /* A priority field changing between two non-zero levels keeps
++             * the source enabled: adjust 0, new priority only. */
++            sh_intc_toggle_mask(desc, enum_ids[k], now - was, 0, prio);
+         }
+     }
+ 
+@@ -440,6 +471,7 @@
+     for (i = 0; id; id = s->next_enum_id, i++) {
+         s = &s->parent->sources[id];
+         if (i == irl) {
++            s->prio = level;
+             sh_intc_toggle_source(s, s->enable_count ? 0 : 1,
+                                   s->asserted ? 0 : 1);
+         } else if (s->asserted) {
+--- a/include/hw/sh4/sh_intc.h
++++ b/include/hw/sh4/sh_intc.h
+@@ -41,6 +41,7 @@
+     int enable_count;
+     int enable_max;
+     int pending; /* emulates the result of signal and masking */
++    int prio;    /* priority from the source's priority register, or IRL level */
+     struct intc_desc *parent;
+ };
+ 

@@ -1,0 +1,74 @@
+Subject: [PATCH 0005] sh7750: optionally allow sub-longword cache/TLB-window accesses
+
+The cache/TLB control registers (CCR etc.) are longword-access-only; upstream
+aborts on any other size.  With sh7750_unknown_regs_nonfatal a sub-longword
+read returns the addressed part of the register value and a sub-longword
+write is ignored (logged with -d guest_errors).  Boards that do not set the
+flag keep the abort.
+
+--- a/hw/sh4/sh7750.c
++++ b/hw/sh4/sh7750.c
+@@ -641,11 +641,21 @@
+ #define MM_UTLB_DATA     (7)
+ #define MM_REGION_TYPE(addr)  ((addr & MM_REGION_MASK) >> 24)
+ 
+-static uint64_t invalid_read(void *opaque, hwaddr addr)
++/*
++ * The cache/TLB control registers in this window (CCR etc.) are
++ * longword-access-only (SH7751 hw manual).  Upstream aborts on any other
++ * size; with sh7750_unknown_regs_nonfatal a sub-longword read returns the
++ * addressed part of the register's longword value and a sub-longword write
++ * is ignored (logged with -d guest_errors).
++ */
++static void sh7750_mmct_subword(bool write, hwaddr addr, unsigned size)
+ {
+-    abort();
+-
+-    return 0;
++    if (!sh7750_unknown_regs_nonfatal) {
++        abort();
++    }
++    qemu_log_mask(LOG_GUEST_ERROR, "sh7750: %u-byte %s of longword-only"
++                  " register 0x%08" PRIx32 "\n", size,
++                  write ? "write" : "read", (uint32_t)addr);
+ }
+ 
+ static uint64_t sh7750_mmct_read(void *opaque, hwaddr addr,
+@@ -655,7 +665,14 @@
+     uint32_t ret = 0;
+ 
+     if (size != 4) {
+-        return invalid_read(opaque, addr);
++        uint32_t aligned = (uint32_t)addr & ~3u;
++        uint32_t full = sh7750_mmct_read(opaque, aligned, 4);
++        unsigned shift = ((uint32_t)addr & 3) * 8;
++        uint32_t mask = size == 1 ? 0xffu : size == 2 ? 0xffffu : 0xffffffffu;
++
++        sh7750_mmct_subword(false, addr, size);
++        ret = (full >> shift) & mask;
++        return ret;
+     }
+ 
+     switch (MM_REGION_TYPE(addr)) {
+@@ -686,19 +703,14 @@
+     return ret;
+ }
+ 
+-static void invalid_write(void *opaque, hwaddr addr,
+-                          uint64_t mem_value)
+-{
+-    abort();
+-}
+-
+ static void sh7750_mmct_write(void *opaque, hwaddr addr,
+                               uint64_t mem_value, unsigned size)
+ {
+     SH7750State *s = opaque;
+ 
+     if (size != 4) {
+-        invalid_write(opaque, addr, mem_value);
++        sh7750_mmct_subword(true, addr, size);
++        return;
+     }
+ 
+     switch (MM_REGION_TYPE(addr)) {

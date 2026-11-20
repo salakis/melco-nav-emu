@@ -1,0 +1,47 @@
+{
+  "ref": "I 80",
+  "bbox": [
+    40.69,
+    -114.0,
+    40.8,
+    -113.35
+  ],
+  "overpass_query": "[out:json][timeout:120];way[\"highway\"=\"motorway\"][\"ref\"~\"(^|;)I\\ 80($|;)\"](40.690000,-114.000000,40.800000,-113.350000);(._;>;);out body;",
+  "osm_timestamp": "2026-11-20T19:32:18Z",
+  "osm_way_ids": [
+    44112708,
+    1441843545
+  ],
+  "start": [
+    40.7315207,
+    -113.4860886
+  ],
+  "end": [
+    40.7330077,
+    -113.5513565
+  ],
+  "length_m": 5502,
+  "max_deviation_from_chord_m": 0.0,
+  "heading_deg": [
+    271.72,
+    271.72
+  ],
+  "height_m": [
+    1286.0,
+    1288.0
+  ],
+  "height_source": "Copernicus GLO-90 DEM via api.open-meteo.com",
+  "seconds": 180.0,
+  "kmh": 110.0,
+  "rate_hz": 10.0,
+  "license": "Map data (c) OpenStreetMap contributors, ODbL 1.0",
+  "signal": {
+    "gps_time": "2009-09-09 09:09:15",
+    "gps_week": 1548,
+    "gps_tow_s": 292155,
+    "generator": "GPS-SDR-SIM -e brdc0010.22n -x motion.csv -d 180.0 -s 2500000 -b 16 -T 2009/09/09,09:09:15 -i -p 32",
+    "tracker": "PocketSDR pocket_trk -sig L1CA -prn 1-32 -fmt CS16 -f 2.5 -fo 0 -ti 0",
+    "export": "tools/gps/export_replay.py --gps-tow 292155",
+    "nav_subframes": 315
+  }
+}

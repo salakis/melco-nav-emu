@@ -1,0 +1,36 @@
+Subject: [PATCH 0001] sh4: register the cup2006 machine
+
+Build hw/sh4/cup2006.c (the Volvo RTI MMM+ / CU-P2006 board, from the
+machine/ directory of melco-nav-emu) into qemu-system-sh4.
+
+--- a/hw/sh4/Kconfig
++++ b/hw/sh4/Kconfig
+@@ -13,6 +13,12 @@
+     select SH7750
+     select SH_PCI
+ 
++config CUP2006
++    bool
++    default y
++    depends on SH4
++    select SH7750
++
+ config SH7750
+     bool
+     select SH_INTC
+--- a/hw/sh4/meson.build
++++ b/hw/sh4/meson.build
+@@ -4,5 +4,6 @@
+   'sh7750_regnames.c',
+ ))
+ sh4_ss.add(when: 'CONFIG_R2D', if_true: files('r2d.c'))
++sh4_ss.add(when: 'CONFIG_CUP2006', if_true: files('cup2006.c'))
+ 
+ hw_arch += {'sh4': sh4_ss}
+--- a/configs/devices/sh4-softmmu/default.mak
++++ b/configs/devices/sh4-softmmu/default.mak
+@@ -7,3 +7,4 @@
+ 
+ # Boards are selected by default, uncomment to keep out of the build.
+ # CONFIG_R2D=n
++# CONFIG_CUP2006=n

@@ -1,0 +1,42 @@
+# Proprietary / generated images: never commit
+images/*
+!images/README.md
+*.iso
+*.ISO
+*.mds
+*.MDS
+*.qcow2
+*.raw
+*.img
+*.nb0
+*.vmdk
+
+# Build outputs (build/: HDD images, units, GPS scenarios)
+build/
+# scripts/qemu.sh: the patched QEMU tree, the downloaded tarball, the
+# extraction scratch directory and the tree a patch change set aside
+qemu/src/
+qemu/cache/
+qemu/.extract/
+qemu/previous-src/
+*.o
+*.a
+*.dylib
+*.so
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.pytest_cache/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Logs (QEMU -D traces, serial captures)
+*.log

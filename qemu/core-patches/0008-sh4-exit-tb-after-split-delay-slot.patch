@@ -1,0 +1,30 @@
+Subject: [PATCH 0008] sh4: return to the main loop after a delay slot that starts a TB
+
+`rte` ends its TB before the delay slot (DISAS_STOP), so the slot runs in a
+TB of its own that is entered from the main loop.  That loop's interrupt
+check runs first, and superh_cpu_exec_interrupt declines a HARD interrupt
+in a delay slot ("Delay slots are indivisible"); the TB-exit request is
+consumed with it.  The slot TB then chained with lookup_and_goto_ptr, so a
+source that stays asserted with no new edge (the kick only fires on
+edges) was never taken while the guest sat in a self-linked idle TB.
+
+The SH-4 accepts a pending interrupt as soon as the rte delay slot
+completes, so a TB that started in a delay slot now exits to the main
+loop after it.
+
+--- a/target/sh4/translate.c
++++ b/target/sh4/translate.c
+@@ -262,7 +262,12 @@
+            delayed jump as immediate jump are conditinal jumps */
+         tcg_gen_mov_i32(cpu_pc, cpu_delayed_pc);
+         tcg_gen_discard_i32(cpu_delayed_pc);
+-        if (use_exit_tb(ctx)) {
++        /*
++         * CU-P2006: exit to the main loop after a TB that started inside a
++         * delay slot, so an interrupt still pending at the new IMASK is
++         * taken, as the SH-4 does after rte.
++         */
++        if (use_exit_tb(ctx) || (ctx->tbflags & TB_FLAG_DELAY_SLOT_MASK)) {
+             tcg_gen_exit_tb(NULL, 0);
+         } else {
+             tcg_gen_lookup_and_goto_ptr();

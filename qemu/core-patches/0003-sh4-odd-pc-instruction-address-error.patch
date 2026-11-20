@@ -1,0 +1,51 @@
+Subject: [PATCH 0003] sh4: raise an address error for instruction fetch from an odd PC
+
+On SH-4 a jump to an odd address raises an instruction address error
+(exception code 0x0E0, TEA = PC).  WinCE uses this as its system-call
+mechanism: API calls are jumps to odd trap addresses that the kernel's
+exception handler dispatches.  QEMU translated the fetch instead.
+
+--- a/target/sh4/helper.h
++++ b/target/sh4/helper.h
+@@ -1,5 +1,6 @@
+ DEF_HELPER_1(ldtlb, void, env)
+ DEF_HELPER_1(raise_illegal_instruction, noreturn, env)
++DEF_HELPER_1(raise_iaddr_error, noreturn, env)
+ DEF_HELPER_1(raise_slot_illegal_instruction, noreturn, env)
+ DEF_HELPER_1(raise_fpu_disable, noreturn, env)
+ DEF_HELPER_1(raise_slot_fpu_disable, noreturn, env)
+--- a/target/sh4/op_helper.c
++++ b/target/sh4/op_helper.c
+@@ -69,6 +69,13 @@
+     raise_exception(env, 0x180, 0);
+ }
+ 
++void helper_raise_iaddr_error(CPUSH4State *env)
++{
++    /* Instruction fetch from an odd address: address error, TEA = PC. */
++    env->tea = env->pc;
++    raise_exception(env, 0x0e0, 0);
++}
++
+ void helper_raise_slot_illegal_instruction(CPUSH4State *env)
+ {
+     raise_exception(env, 0x1a0, 0);
+--- a/target/sh4/translate.c
++++ b/target/sh4/translate.c
+@@ -2272,6 +2272,16 @@
+     }
+ #endif
+ 
++#ifndef CONFIG_USER_ONLY
++    if (unlikely(ctx->base.pc_next & 1)) {
++        /* SH-3/SH-4: odd instruction address raises an address error. */
++        gen_save_cpu_state(ctx, true);
++        gen_helper_raise_iaddr_error(tcg_env);
++        ctx->base.is_jmp = DISAS_NORETURN;
++        ctx->base.pc_next += 1;
++        return;
++    }
++#endif
+     ctx->opcode = translator_lduw(env, &ctx->base, ctx->base.pc_next);
+     decode_opc(ctx);
+     ctx->base.pc_next += 2;

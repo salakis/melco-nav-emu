@@ -1,0 +1,24 @@
+Subject: [PATCH 0006] sh_intc: kick the CPU on every source assert
+
+The interrupt line is a level: a source that becomes pending while another
+one is already pending must still kick the CPU, or its interrupt is only
+taken once the other source is gone.
+
+--- a/hw/intc/sh_intc.c
++++ b/hw/intc/sh_intc.c
+@@ -43,9 +43,12 @@
+     if (pending_changed) {
+         if (source->pending) {
+             source->parent->pending++;
+-            if (source->parent->pending == 1) {
+-                cpu_interrupt(first_cpu, CPU_INTERRUPT_HARD);
+-            }
++            /*
++             * The interrupt line is a level: kick on every source 0->1
++             * edge, not only when the aggregate pending count rises from
++             * zero, or a re-assert while another source is pending is lost.
++             */
++            cpu_interrupt(first_cpu, CPU_INTERRUPT_HARD);
+         } else {
+             source->parent->pending--;
+             if (source->parent->pending == 0) {

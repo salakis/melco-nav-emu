@@ -1,0 +1,130 @@
+Subject: [PATCH 0004] sh7750: optionally keep undecoded on-chip registers non-fatal
+
+The CU-P2006 board's SoC is an SH7770, whose on-chip map is a superset of
+the SH7750 modelled by hw/sh4/sh7750.c.  Upstream aborts on any register the
+model does not decode, which stops the real boot as soon as a driver touches
+an SH7770-only block.
+
+A board can set sh7750_unknown_regs_nonfatal before sh7750_init: undecoded
+registers then read 0 and ignore writes, logged once per address with
+-d unimp.  Boards that do not set it keep the abort.
+
+--- a/hw/sh4/sh7750.c
++++ b/hw/sh4/sh7750.c
+@@ -25,6 +25,7 @@
+ 
+ #include "qemu/osdep.h"
+ #include "qapi/error.h"
++#include "qemu/log.h"
+ #include "hw/core/sysbus.h"
+ #include "hw/core/irq.h"
+ #include "hw/sh4/sh.h"
+@@ -165,15 +166,39 @@
+             kind, regname(addr), addr);
+ }
+ 
+-static uint32_t sh7750_mem_readb(void *opaque, hwaddr addr)
++/*
++ * Boards whose SoC is a superset of the SH7750 (the CU-P2006's SH7770) set
++ * sh7750_unknown_regs_nonfatal before sh7750_init: an undecoded on-chip
++ * register then reads 0 and ignores writes (logged once per address with
++ * -d unimp) instead of aborting QEMU.  Other boards keep the abort.
++ */
++bool sh7750_unknown_regs_nonfatal;
++
++static void unknown_access(const char *kind, hwaddr addr)
+ {
+-    switch (addr) {
+-    default:
+-        error_access("byte read", addr);
++    static GHashTable *seen;
++
++    if (!sh7750_unknown_regs_nonfatal) {
++        error_access(kind, addr);
+         abort();
+     }
++    if (!seen) {
++        seen = g_hash_table_new(g_direct_hash, g_direct_equal);
++    }
++    if (!g_hash_table_add(seen, GUINT_TO_POINTER((guint)addr))) {
++        return;
++    }
++    qemu_log_mask(LOG_UNIMP, "sh7750: unimplemented register 0x%08" PRIx32
++                  " (%s): %s, reads 0 / writes ignored\n",
++                  (uint32_t)addr, regname(addr), kind);
+ }
+ 
++static uint32_t sh7750_mem_readb(void *opaque, hwaddr addr)
++{
++    unknown_access("byte read", addr);
++    return 0;
++}
++
+ static uint32_t sh7750_mem_readw(void *opaque, hwaddr addr)
+ {
+     SH7750State *s = opaque;
+@@ -204,8 +229,8 @@
+         ignore_access("word read", addr);
+         return 0;
+     default:
+-        error_access("word read", addr);
+-        abort();
++        unknown_access("word read", addr);
++        return 0;
+     }
+ }
+ 
+@@ -256,8 +281,8 @@
+         scc = SUPERH_CPU_GET_CLASS(s->cpu);
+         return scc->prr;
+     default:
+-        error_access("long read", addr);
+-        abort();
++        unknown_access("long read", addr);
++        return 0;
+     }
+ }
+ 
+@@ -272,8 +297,7 @@
+         return;
+     }
+ 
+-    error_access("byte write", addr);
+-    abort();
++    unknown_access("byte write", addr);
+ }
+ 
+ static void sh7750_mem_writew(void *opaque, hwaddr addr,
+@@ -324,8 +348,8 @@
+         }
+         return;
+     default:
+-        error_access("word write", addr);
+-        abort();
++        unknown_access("word write", addr);
++        return;
+     }
+ }
+ 
+@@ -405,8 +429,8 @@
+         s->ccr = mem_value;
+         return;
+     default:
+-        error_access("long write", addr);
+-        abort();
++        unknown_access("long write", addr);
++        return;
+     }
+ }
+ 
+--- a/include/hw/sh4/sh.h
++++ b/include/hw/sh4/sh.h
+@@ -37,6 +37,8 @@
+ struct SH7750State;
+ 
+ struct SH7750State *sh7750_init(SuperHCPU *cpu, MemoryRegion *sysmem);
++/* Set before sh7750_init: undecoded registers read 0 instead of aborting. */
++extern bool sh7750_unknown_regs_nonfatal;
+ 
+ #define TYPE_SH_SERIAL "sh-serial"
+ #define SH_SERIAL_FEAT_SCIF (1 << 0)
