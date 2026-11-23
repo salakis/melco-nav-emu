@@ -9,7 +9,7 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # Another disc set (e.g. NA-2450-00): export CUP2006_DISC1/CUP2006_DISC2, or
-# pass --dvd1/--dvd2 (or DVD1/DVD2) — the same variables tools/profile.py reads.
+# pass --dvd1/--dvd2 (or DVD1/DVD2) — the same variables boards/cup2006.py reads.
 DVD1="${DVD1:-${CUP2006_DISC1:-$PROJECT_ROOT/images/dvd/disc1/EU-3350-00_1.ISO}}"
 DVD2="${DVD2:-${CUP2006_DISC2:-$PROJECT_ROOT/images/dvd/disc2/EU-3350-00_2.ISO}}"
 OUT="${OUT:-$PROJECT_ROOT/images}"

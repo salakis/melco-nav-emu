@@ -282,7 +282,7 @@ def unit_hdd(unit) -> Path:
 
 def unit_machine(unit, hdd):
     """Machine options for one unit's board revision, non-volatile state
-    (tools/unit.py: flash, battery RAM, battery SRAM, onboard EEPROM) and
+    (melco_nav_emu/unit.py: flash, battery RAM, battery SRAM, onboard EEPROM) and
     disk."""
     unit = Path(unit)
     opts = ["hwrevadc=410", "drfimage=%s" % (unit / "flash.img"),
