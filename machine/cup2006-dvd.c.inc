@@ -61,8 +61,25 @@ static void cup2006_dvd5_spinup(Cup2006MachineState *s)
 
     s->dvd5_spinup_pending = false;
     s->dvd5_disc_ready = true;
-    memcpy(s->dvd5_rx, b1, sizeof(b1));
-    s->dvd5_rx_len = sizeof(b1);
+    if (s->dvd5_rx_pos < s->dvd5_rx_len) {
+        /* Bytes are still queued on the wire: put the B1 after them, dropping
+         * the oldest if the buffer cannot hold both, instead of discarding
+         * the queued status frames. */
+        unsigned left = s->dvd5_rx_len - s->dvd5_rx_pos;
+        unsigned skip = 0;
+
+        if (left + sizeof(b1) > CUP2006_DVD5_RX_MAX) {
+            skip = left + sizeof(b1) - CUP2006_DVD5_RX_MAX;
+            warn_report("cup2006: dvd5: %u queued byte(s) dropped to fit"
+                        " the spin-up B1", skip);
+        }
+        memmove(s->dvd5_rx, s->dvd5_rx + s->dvd5_rx_pos + skip, left - skip);
+        memcpy(s->dvd5_rx + left - skip, b1, sizeof(b1));
+        s->dvd5_rx_len = left - skip + sizeof(b1);
+    } else {
+        memcpy(s->dvd5_rx, b1, sizeof(b1));
+        s->dvd5_rx_len = sizeof(b1);
+    }
     s->dvd5_rx_pos = 0;
     s->dvd5_rx_unsol = true;
     cup2006_dbg(s,  "cup2006: STUB dvd5 spin-up: unsolicited B1 %02x %02x %02x"
@@ -278,9 +295,9 @@ static void cup2006_dvd5_reply(Cup2006MachineState *s, const uint8_t *req,
             reply[1] = 0x90;   /* ejected, in the slot (F11 above) */
         }
     } else if (len >= 3 && req[0] == 0xb8 && req[1] == 0x3a) {
-        /* Echo the request's command byte; until the canonical B4 command
-         * arrives set reply[2] bit 0x10 (the retry "resend" bit); the B4
-         * reply has it clear so the gate accepts it. */
+        /* Echo the request's command byte. STUB: until the canonical B4
+         * command arrives reply[2] carries the retry "resend" bit 0x10, the
+         * value the guest's gate accepts; the B4 reply has it clear. */
         reply[0] = req[2];
         reply[1] = 0x3a;
         reply[2] = (req[2] == 0xb4) ? 0x00 : 0x10;
@@ -318,36 +335,19 @@ static void cup2006_dvd5_reply(Cup2006MachineState *s, const uint8_t *req,
          * byte's drive-side meaning is unknown; answers only this family. */
         reply[0] = 0xb0;
         reply[1] = req[1];
-        /* b8 87 is the driver side of IOCTL_DVD_PREVENT_ALLOW_PARENTAL:
-         * reply[2]=0 (no ACK/resend class) is what makes the guest's own
-         * code report the ioctl as handled. */
+        /* b8 87 is the driver side of IOCTL_DVD_PREVENT_ALLOW_PARENTAL.
+         * STUB: reply[2]=0 (no ACK/resend class) is the value that makes the
+         * guest's own code report the ioctl as handled. */
         reply[2] = (req[1] == 0x87) ? 0x00 : 0x10;
     } else {
         /* Non-3A requests: the retry gate's expected byte is 0xB0. */
         reply[0] = 0xb0;
     }
 
-    /* The shared reply window (the driver mapped this PA with VirtualCopy). */
-    memcpy(s->dvd5_rpl, reply, 8);
-    /* Doorbell/generation word so a later reader sees a new frame. */
-    cup2006_reg32_write(s->dvd5_rpl, 0x40, 8, 4);
-
-    /* The engine's DMA destination is the driver's reply buffer. STUB: the
-     * driver does not program it in the modelled registers, so translate the
-     * fixed VA with the current process's MMU and write there. */
-    if (current_cpu) {
-        pa = cpu_get_phys_page_debug(current_cpu, CUP2006_DVD5_REPLY_VA);
-    } else {
-        pa = (hwaddr)-1;
-    }
-    if (pa != (hwaddr)-1) {
-        physical_memory_write(pa, reply, 8);
-    }
-
-    s->dvd5_replies++;
     /* A drive that reported "loading" finishes before it answers the next
-     * command: if the loading reply's bytes have not drained yet (the drain
-     * trigger in cup2006_dvd5_irq_ack), the B1 goes out ahead of this reply. */
+     * command: settle the spin-up state and patch the reply to ROM-ready
+     * BEFORE the reply is published to any of its three destinations (the
+     * reply window, the driver's VA buffer, the byte port). */
     if (spinup_was_pending && s->dvd5_spinup_pending) {
         cup2006_dvd5_spinup(s);
         if (req[0] == 0xb8 && (req[1] == 0x80 || req[1] == 0x81 ||
@@ -358,6 +358,26 @@ static void cup2006_dvd5_reply(Cup2006MachineState *s, const uint8_t *req,
             reply[3] = CUP2006_DVD5_TYPE_DVDROM;
         }
     }
+
+    /* The shared reply window (the driver mapped this PA with VirtualCopy). */
+    memcpy(s->dvd5_rpl, reply, 8);
+    /* Doorbell/generation word so a later reader sees a new frame. */
+    cup2006_reg32_write(s->dvd5_rpl, 0x40, 8, 4);
+
+    /* The engine's DMA destination is the driver's reply buffer. STUB: the
+     * driver does not program that address in any modelled register (it is
+     * a fixed VA from one firmware build), so translate it with the current
+     * process's MMU and write there; see README limitations. */
+    if (current_cpu) {
+        pa = cpu_get_phys_page_debug(current_cpu, CUP2006_DVD5_REPLY_VA);
+    } else {
+        pa = (hwaddr)-1;
+    }
+    if (pa != (hwaddr)-1) {
+        physical_memory_write(pa, reply, 8);
+    }
+
+    s->dvd5_replies++;
     /* stage the reply at the device's byte port and raise the line. */
     if (s->dvd5_rx_unsol && s->dvd5_rx_pos < s->dvd5_rx_len) {
         /* An unsolicited frame is still on the wire: queue the reply after
@@ -411,7 +431,7 @@ static void cup2006_dvd5_doorbell(Cup2006MachineState *s)
     memcpy(req, s->dvd5_req, sizeof(req));
     len = cup2006_reg32_read(s->dvd5_req, 0x40, 4);
     if (len == 0 || len > sizeof(req) || req[0] < 0xb8 || req[0] > 0xbf) {
-        qemu_log_mask(LOG_GUEST_ERROR,
+        cup2006_dbg(s,
                       "cup2006: dvd5 doorbell without a frame"
                       " (first=%02x len=%u)\n", req[0], len);
         return;
@@ -424,7 +444,7 @@ static uint64_t cup2006_dvd5_read(void *opaque, hwaddr addr, unsigned size)
     Cup2006MachineState *s = opaque;
     uint32_t value = cup2006_reg32_read(s->dvd5_reg, addr, size);
 
-    qemu_log_mask(LOG_GUEST_ERROR,
+    cup2006_dbg(s,
                   "cup2006: dvd5 read  pc=0x%08" PRIx32
                   " addr=0x%08" HWADDR_PRIx " size=%u value=0x%x\n",
                   cup2006_guest_pc(), CUP2006_DVD5_BASE + addr, size, value);
@@ -439,7 +459,7 @@ static void cup2006_dvd5_write(void *opaque, hwaddr addr, uint64_t value,
     Cup2006MachineState *s = opaque;
 
     cup2006_reg32_write(s->dvd5_reg, addr, value, size);
-    qemu_log_mask(LOG_GUEST_ERROR,
+    cup2006_dbg(s,
                   "cup2006: dvd5 write pc=0x%08" PRIx32
                   " addr=0x%08" HWADDR_PRIx " size=%u value=0x%" PRIx64
                   "\n", cup2006_guest_pc(), CUP2006_DVD5_BASE + addr,
@@ -491,13 +511,10 @@ static void cup2006_dvd5_req_write(void *opaque, hwaddr addr, uint64_t value,
     Cup2006MachineState *s = opaque;
 
     cup2006_reg32_write(s->dvd5_req, addr, value, size);
-    /* The sender memcpy's the frame into this window first and then stores
-     * its length at +0x40; the doorbell in the control window is the last
-     * step. Trigger on the length store so a completed frame is read whole. */
-    if (addr == 0x40 && value >= 1 && value <= 24 &&
-        s->dvd5_req[0] >= 0xb8 && s->dvd5_req[0] <= 0xbf) {
-        cup2006_dvd5_doorbell(s);
-    }
+    /* The sender memcpy's the frame into this window, stores its length at
+     * +0x40 and then rings the doorbell (reply window +0x44) as the last
+     * step.  Answer once, on the doorbell only: triggering on the length
+     * store as well made every frame get two replies. */
     if (addr == CUP2006_DVD5_DOORBELL &&
         (value & CUP2006_DVD5_DOORBELL_V)) {
         cup2006_dvd5_doorbell(s);
@@ -531,7 +548,7 @@ static uint64_t cup2006_dvdst_read(void *opaque, hwaddr addr, unsigned size)
         value = cup2006_reg32_read(s->dvdst_reg, addr, size);
     }
 
-    qemu_log_mask(LOG_GUEST_ERROR,
+    cup2006_dbg(s,
                   "cup2006: dvdst read  pc=0x%08" PRIx32
                   " addr=0x%08" HWADDR_PRIx " size=%u value=0x%x\n",
                   cup2006_guest_pc(), CUP2006_DVDST_BASE + addr, size, value);
@@ -544,7 +561,7 @@ static void cup2006_dvdst_write(void *opaque, hwaddr addr, uint64_t value,
     Cup2006MachineState *s = opaque;
 
     cup2006_reg32_write(s->dvdst_reg, addr, value, size);
-    qemu_log_mask(LOG_GUEST_ERROR,
+    cup2006_dbg(s,
                   "cup2006: dvdst write pc=0x%08" PRIx32
                   " addr=0x%08" HWADDR_PRIx " size=%u value=0x%" PRIx64
                   "\n", cup2006_guest_pc(), CUP2006_DVDST_BASE + addr,
