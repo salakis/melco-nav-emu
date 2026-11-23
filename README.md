@@ -1,26 +1,27 @@
 # melco-nav-emu
 
-A QEMU-based emulator for the **Volvo RTI MMM+ navigation head unit**
-(CU-P2006: Renesas SH7770 / SH-4A, Windows CE 4.2, hardware by Mitsubishi
-Electric) from Volvo P1 cars. It boots the real, unmodified head-unit software
-from your own dump of a retail map DVD set to the navigation map.
+A QEMU-based emulator for Mitsubishi Electric navigation units. The same
+`qemu-system-sh4` binary runs each unit's original firmware and map data.
 
-Emulation is at the **hardware** level: the SoC and the board devices are
-modelled at their registers and interrupts (display unit, 2DG drawing engine,
-Sub-CPU link with keys and car status, ATA disk, DVD drive, GPS tracking chip,
-flash, battery RAM, EEPROM, sound). The guest's kernel, drivers and
-applications run unmodified from the disc's own image. Where a device is only
-approximated, the code says so with a `STUB:` comment.
+| QEMU machine | Head unit | Tested disc set |
+|---|---|---|
+| `cup2006` | Volvo RTI MMM+ (CU-P2006) | 2017–18 Europe (`EU-3350-00`, Volvo 32214046) |
+| `cup28` | Volvo VNS (CUP28) | North America Western (`NA_0900_06A_WESTERN`) |
 
-Status: runs on macOS (Apple Silicon) with the 2017-18 Europe discs
-(`EU-3350-00`, Volvo part no. 32214046): boot logo, disclaimer, ENTER, then
-the 3D and 2D map views driven from the keyboard, with GPS from a recording,
-and voice prompts.
-Known gaps are listed under [Limitations](#limitations).
+The emulator models board hardware at its registers and interrupts and runs the
+disc's own Windows CE kernel, drivers and navigation application. The models
+are tested on macOS (Apple Silicon). The source labels approximated hardware
+behavior with `STUB:` comments.
 
-![2D map view on the A-4 (Autovía del Sur), car marker following the `eu-a4` GPS scenario](screenshots/eu-a4-2d-map.png)
+One deliberate exception to "hardware only": on a unit's first power-on the
+host-side launcher (`tools/unit.py`) writes the unit's own map-install record
+into its battery RAM, because the served HDD already holds the complete map
+install and there is no real install process to run (marked `STUB` there; see
+"The unit's state" below).
 
-No firmware, disc or map data is included. You need your own dumps.
+No firmware, disc or map data is included. You need your own dumps. For the
+same reason no UI screenshots are published: a capture of the running unit
+would show the proprietary map data and firmware interface.
 
 ## Requirements
 
@@ -28,11 +29,42 @@ No firmware, disc or map data is included. You need your own dumps.
   and `pkg-config` (QEMU's build dependencies). Linux builds the same way but
   is untested.
 - Python 3.9 or later.
-- About **45 GB free disk**: the disc ISOs (~9.5 GB), and the virtual HDD
+- **CU-P2006** needs about **45 GB free disk**: the disc ISOs (~9.5 GB), and the virtual HDD
   (~22 GB, built once from the discs; the build needs about as much again
   for temporary part files until it finishes).
 
-## Install and run
+## Run CUP28 (Volvo VNS)
+
+From the repository root, build QEMU and point the launcher at your Western
+map DVD ISO.
+
+```sh
+make qemu
+CUP28_DISC="/path/to/Disc A - Western.iso" make boot MODEL=cup28
+```
+
+Use Enter to accept the disclaimer, Escape to go back, and the arrow keys to
+navigate. The macOS window is resizable and uses CoreAudio. On a new unit the
+firmware can initially look for European files. Let it finish its first power-on,
+close the window, then run the same command again. The guest saves the North
+American market setting supplied over MOST and uses miles and US English
+guidance. The launcher stores flash and battery-backed SRAM in `build/cup28`.
+Set `CUP28_UNIT` to a different directory to start a separate unit.
+
+To replay a drive, pass a uniformly sampled sensor CSV. This example uses the
+three-minute I-80 scenario included in the repository.
+
+```sh
+.venv/bin/python -m melco_nav_emu.cli boot --model cup28 \
+  --disc "/path/to/Disc A - Western.iso" --track scenarios/na-i80/sensors.csv
+```
+
+Each row contains `t_s,lat_deg,lon_deg,alt_m,speed_kmh,heading_deg,yaw_dps,gps`.
+Use `gps=0` to simulate loss of fix while wheel pulses and gyro continue. The
+replay ends at rest with an invalid fix. The default is a stationary receiver in
+San Francisco. See [CUP28 hardware and limitations](docs/board-cup28.md).
+
+## Install and run CU-P2006 (Volvo RTI MMM+)
 
 ```sh
 make qemu        # download the pinned QEMU release, patch it, build (minutes)
@@ -116,6 +148,8 @@ the Europe set. Other and older disc sets have not been tested.
 
 ## GPS
 
+### CU-P2006
+
 Without a recording the GPS receiver has no signal (no fix). Two short
 recorded drives ship in `scenarios/`, each 3 minutes at 110 km/h on the
 straightest 5.5 km of a motorway, picked from OpenStreetMap:
@@ -143,7 +177,15 @@ explains how they are made. A scenario directory holds:
 - `sensors.csv`: the car's sensors on the same clock, one row per sample:
   `t_s,lat_deg,lon_deg,alt_m,speed_kmh,heading_deg,yaw_dps[,gps]`. Speed
   drives the wheel-pulse frames, yaw the gyro; the position columns are not
-  used.
+  used (the fix comes from `drive.replay`).
+
+### CUP28
+
+CUP28 has no GNSS radio replay: by default the board model sends a fixed
+stationary fix in San Francisco over MOST, and `boot --model cup28 --track
+scenarios/<name>/sensors.csv` instead drives position, wheel count and gyro
+from the `lat_deg`/`lon_deg` columns (see "Run CUP28" above). `drive.replay`
+is not used by this unit.
 
 ## Other options
 
@@ -153,10 +195,13 @@ explains how they are made. A scenario directory holds:
 | `DISPLAY_BACKEND=sdl` / `none` | another QEMU display instead of `cocoa,zoom-to-fit=on` |
 | `python3 tools/profile.py -machine verbose=on` | log device activity (Sub-CPU link, keys, disk, display) on stderr |
 
-`python3 tools/profile.py` is what `make boot` runs; extra arguments are passed
-to QEMU. `qemu-system-sh4 -M cup2006,help` lists the machine options.
+The default `make boot` uses `tools/profile.py`. When you invoke the profile
+directly, it passes extra arguments to QEMU. The patched binary is built at
+`qemu/src/build/qemu-system-sh4` (nothing is installed onto your PATH); use
+`qemu/src/build/qemu-system-sh4 -M cup2006,help` or `-M cup28,help` to list
+board-specific machine options.
 
-## Limitations
+## CU-P2006 limitations
 
 - **3D map car marker.** Navi draws it with the PowerVR MBX 3D core, which is
   not emulated, so the 3D view has no marker. `CUP2006_CARMARKER=1` draws an
@@ -173,16 +218,16 @@ to QEMU. `qemu-system-sh4 -M cup2006,help` lists the machine options.
 ## Layout
 
 ```
-machine/            the board model: cup2006.c and one .c.inc per device,
-                    compiled as one file (symlinked into QEMU's hw/sh4/)
+machine/            board models (cup2006.c and cup28.c) and device sources,
+                    symlinked into QEMU's hw/sh4/
 qemu/upstream.json  the pinned QEMU release
-qemu/core-patches/  small changes to QEMU's SH-4 CPU and interrupt controller
-scenarios/          two 3-minute GPS drives (OpenStreetMap-based)
-screenshots/        UI screenshots (plain PNGs, no metadata chunks)
+qemu/core-patches/  machine registration and small SH-4 changes
+scenarios/          two 3-minute GPS drives (OpenStreetMap-based, ODbL 1.0:
+                    see scenarios/LICENSE)
 scripts/            build QEMU, extract the discs, carve the firmware,
                     build and verify the HDD
 tools/gps/          make GPS scenarios from OpenStreetMap
-tools/profile.py    the boot command line (make boot)
+tools/profile.py    CU-P2006 boot and media preparation
 tools/unit.py       a unit's persistent state
 src/melco_nav_emu/  Python package (image parsers, QMP client, CLI)
 tests/              offline unit tests
@@ -193,9 +238,13 @@ tests/              offline unit tests
 GPL-2.0-or-later, see [LICENSE](LICENSE). The built `qemu-system-sh4` contains
 QEMU, so the binary is GPLv2.
 
-The GPS scenarios in `scenarios/` are derived from OpenStreetMap data:
-© OpenStreetMap contributors, available under the Open Database License
-(ODbL 1.0). Their heights come from the Copernicus GLO-90 DEM.
+The GPS scenarios in `scenarios/` are derived from OpenStreetMap data and
+are licensed separately, under the Open Database License (ODbL) 1.0 — see
+[scenarios/LICENSE](scenarios/LICENSE). Map data © OpenStreetMap contributors
+(https://www.openstreetmap.org/copyright). Their heights come from the
+Copernicus GLO-90 DEM (© Copernicus Programme), retrieved via the Open-Meteo
+elevation API (CC BY 4.0, https://open-meteo.com). Everything else in the
+repository is GPL-2.0-or-later.
 
 This project is not affiliated with, authorised or endorsed by any of the
 companies named here. Volvo and RTI are trademarks of Volvo Car Corporation;

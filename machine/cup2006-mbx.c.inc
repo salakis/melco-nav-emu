@@ -23,7 +23,8 @@ static void cup2006_mbx_write(Cup2006MachineState *s, hwaddr base,
     /*
      * +0x838 = 1 arms one descriptor. STUB: the request completes instantly
      * ("+0x12C bit 6 parameter memory ready") when the +0x130 bit-6 enable
-     * is set; render/TA-done bits are never set (no rasteriser).
+     * is set; the render/TA-done status bits are set by the display
+     * model at the first status read (du.c.inc) — no rasteriser here.
  */
     if (off == CUP2006_MBX_SURFACE_END && *slot == 1) {
         s->mbx_arm_seq++;

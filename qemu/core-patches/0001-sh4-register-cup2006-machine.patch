@@ -1,5 +1,10 @@
 Subject: [PATCH 0001] sh4: register the cup2006 machine
 
+# melco-nav-emu core patch.
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (c) 2026 melco-nav-emu contributors
+# Modifies GPL-licensed QEMU sources; applied by scripts/qemu.sh.
+
 Build hw/sh4/cup2006.c (the Volvo RTI MMM+ / CU-P2006 board, from the
 machine/ directory of melco-nav-emu) into qemu-system-sh4.
 

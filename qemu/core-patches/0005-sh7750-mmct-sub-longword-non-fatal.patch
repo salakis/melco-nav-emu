@@ -1,5 +1,10 @@
 Subject: [PATCH 0005] sh7750: optionally allow sub-longword cache/TLB-window accesses
 
+# melco-nav-emu core patch.
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (c) 2026 melco-nav-emu contributors
+# Modifies GPL-licensed QEMU sources; applied by scripts/qemu.sh.
+
 The cache/TLB control registers (CCR etc.) are longword-access-only; upstream
 aborts on any other size.  With sh7750_unknown_regs_nonfatal a sub-longword
 read returns the addressed part of the register value and a sub-longword

@@ -1,4 +1,9 @@
-Subject: [PATCH 0007] sh4: FLDI0/FLDI1 load the constant whatever FPSCR.PR is
+Subject: [PATCH 0007]
+# melco-nav-emu core patch.
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (c) 2026 melco-nav-emu contributors
+# Modifies GPL-licensed QEMU sources; applied by scripts/qemu.sh.
+ sh4: FLDI0/FLDI1 load the constant whatever FPSCR.PR is
 
 QEMU raises an illegal-instruction exception for FLDI0/FLDI1 when
 FPSCR.PR=1.  The SH-4 Software Manual (9.32/9.33) defines both only for
@@ -12,7 +17,7 @@ load the single-precision constant into FRn as with PR=0.
          break;
      case 0xf08d: /* fldi0 FRn - FPSCR: R[PR] */
 +        /*
-+         * CU-P2006: no PR check.  The SH-4 manual defines FLDI0/FLDI1 only
++         * No PR check.  The SH-4 manual defines FLDI0/FLDI1 only
 +         * for PR=0 and lists "Possible Exceptions: None", so load the
 +         * single-precision constant as with PR=0.
 +         */

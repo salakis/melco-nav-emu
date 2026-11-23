@@ -405,14 +405,10 @@ static void cup2006_intc2_summary(Cup2006MachineState *s)
     cup2006_dbg(s,  "cup2006: STUB intc2 summary writes=%" PRIu64
             " ack11=%" PRIu64 " ack12=%" PRIu64 " ack1a=%" PRIu64
             " en11=%" PRIu64 " en12=%" PRIu64 " en1a=%" PRIu64
-            " other=%" PRIu64 " gate=%" PRIu64
-            " gate_pending=%" PRIu64 " gate_idle=%" PRIu64
-            " gate_acks=%" PRIu64 "\n",
+            " other=%" PRIu64 "\n",
             s->intc2_writes, s->disp_ack[0], s->disp_ack[1],
             s->disp_ack[2], s->disp_enable[0], s->disp_enable[1],
-            s->disp_enable[2], s->intc2_other, s->intc2_gate_reads,
-            s->intc2_gate_pending_reads, s->intc2_gate_idle_reads,
-            s->intc2_gate_acks);
+            s->disp_enable[2], s->intc2_other);
 }
 
 static uint64_t cup2006_intc2_read_at(Cup2006MachineState *s, hwaddr base,

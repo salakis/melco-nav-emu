@@ -85,8 +85,13 @@ if [ ! -f "$SRC/build/build.ninja" ]; then
   (cd "$SRC" && ./configure --target-list="$TARGET" --disable-werror --disable-docs \
      --disable-gtk --ninja="$VENV/bin/ninja" --python="$VENV/bin/python")
 fi
-ninja -C "$SRC/build" "$BINARY-unsigned"
-# macOS: the signed copy needs an entitlement step that sometimes fails; the
-# unsigned binary is functionally identical, so fall back to it.
-ninja -C "$SRC/build" "$BINARY" 2>/dev/null || cp "$SRC/build/$BINARY-unsigned" "$SRC/build/$BINARY"
+if [ "$(uname -s)" = "Darwin" ]; then
+  # The "-unsigned" ninja target exists only on macOS (ad-hoc signing).
+  ninja -C "$SRC/build" "$BINARY-unsigned"
+  # The signed copy needs an entitlement step that sometimes fails; the
+  # unsigned binary is functionally identical, so fall back to it.
+  ninja -C "$SRC/build" "$BINARY" 2>/dev/null || cp "$SRC/build/$BINARY-unsigned" "$SRC/build/$BINARY"
+else
+  ninja -C "$SRC/build" "$BINARY"
+fi
 echo "built $SRC/build/$BINARY"

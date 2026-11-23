@@ -7,6 +7,8 @@ import struct
 from dataclasses import dataclass, field
 from typing import List
 
+from .images import ImageFormatError
+
 
 def dsa_pos(dsa: int) -> int:
     """DSA -> byte position within the volume (sector 2 KiB + 32-B block)."""
@@ -54,13 +56,13 @@ class LoadingImage:
 
 def parse_loading(data: bytes) -> LoadingImage:
     if len(data) < 4:
-        raise ValueError("LOADING.KWI is too short")
+        raise ImageFormatError("LOADING.KWI is too short")
     n_sys = _u16(data, 0)
     off = 4
     image = LoadingImage(data=data)
     for sys_index in range(n_sys):
         if off + 16 > len(data):
-            raise ValueError("truncated system record")
+            raise ImageFormatError("truncated system record")
         mid = data[off : off + 12]
         n_mod = _u16(data, off + 12)
         off += 16
@@ -69,7 +71,7 @@ def parse_loading(data: bytes) -> LoadingImage:
         ids = []
         for _ in range(n_mod):
             if off + 64 > len(data):
-                raise ValueError("truncated module id record")
+                raise ImageFormatError("truncated module id record")
             ids.append(
                 {
                     "kind": data[off],
@@ -82,7 +84,7 @@ def parse_loading(data: bytes) -> LoadingImage:
         modules = []
         for ident in ids:
             if off + 256 > len(data):
-                raise ValueError("truncated module management record")
+                raise ImageFormatError("truncated module management record")
             modules.append(
                 LoadingModule(
                     system=sys_index,

@@ -1,5 +1,10 @@
 Subject: [PATCH 0006] sh_intc: kick the CPU on every source assert
 
+# melco-nav-emu core patch.
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (c) 2026 melco-nav-emu contributors
+# Modifies GPL-licensed QEMU sources; applied by scripts/qemu.sh.
+
 The interrupt line is a level: a source that becomes pending while another
 one is already pending must still kick the CPU, or its interrupt is only
 taken once the other source is gone.

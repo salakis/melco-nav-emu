@@ -1,5 +1,10 @@
 Subject: [PATCH 0002] sh_intc: deliver by priority against IMASK
 
+# melco-nav-emu core patch.
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (c) 2026 melco-nav-emu contributors
+# Modifies GPL-licensed QEMU sources; applied by scripts/qemu.sh.
+
 Upstream sh_intc_get_pending_vector returns the first pending source and
 ignores priorities.  The SH-4 takes an interrupt only when its priority is
 greater than SR.IMASK, and the highest-priority pending source first, so

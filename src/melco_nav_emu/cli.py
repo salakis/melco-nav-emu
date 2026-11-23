@@ -1,6 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Copyright (c) 2026 melco-nav-emu contributors
-"""Command-line entry point for the Volvo RTI emulator."""
+"""Command-line entry point for the melco-nav-emu emulator collection.
+
+Two Mitsubishi Electric navigation units share one patched qemu-system-sh4:
+the Volvo RTI MMM+ (CU-P2006, machine `cup2006`) and the Volvo VNS (CUP28,
+machine `cup28`)."""
 from __future__ import annotations
 
 import argparse
@@ -12,10 +16,10 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from . import __version__
-from .images import flatten_b000ff, load_sce, parse_b000ff
+from . import __version__, cup28
+from .images import ImageFormatError, flatten_b000ff, load_sce, parse_b000ff
 from .loading import parse_loading
-from .qmp import QMPClient
+from .qmp import QMPClient, QMPError
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 IMAGES = PROJECT_ROOT / "images"
@@ -42,6 +46,7 @@ def cmd_info(args: argparse.Namespace) -> int:
     print("images:  %s" % IMAGES)
     print("qemu:    %s" % (args.qemu or DEFAULT_QEMU))
     print("")
+    print("CU-P2006 inputs (images/):")
     for rel in EXPECTED:
         found = sorted(IMAGES.glob(rel))
         if not found:
@@ -51,6 +56,11 @@ def cmd_info(args: argparse.Namespace) -> int:
         else:
             status = "ok"
         print("  %-55s %s" % (rel, status))
+    disc = os.environ.get("CUP28_DISC")
+    print("")
+    print("CUP28 input:  CUP28_DISC=%s" % (disc or "(unset)"))
+    if disc:
+        print("  %-55s %s" % (disc, "ok" if Path(disc).is_file() else "missing"))
     return 0
 
 
@@ -109,10 +119,50 @@ def cmd_qmp(args: argparse.Namespace) -> int:
 
 
 def cmd_screenshot(args: argparse.Namespace) -> int:
+    # QEMU opens the filename in its own working directory, so resolve it
+    # here: the printed path must be where the file actually lands.
+    out = Path(args.output).resolve()
     with QMPClient(args.address) as client:
-        client.screendump(str(args.output))
-    print(str(args.output))
+        client.screendump(str(out))
+    print(str(out))
     return 0
+
+
+def cmd_boot(args: argparse.Namespace) -> int:
+    if args.model == "cup2006":
+        if args.disc or args.track or args.qmp or args.audio is not None or args.qemu:
+            raise ImageFormatError("for CU-P2006 media and hardware options, use tools/profile.py")
+        env = os.environ.copy()
+        if args.unit:
+            env["CUP2006_UNIT"] = str(args.unit.resolve())
+        if args.display:
+            env["DISPLAY_BACKEND"] = args.display
+        profile = PROJECT_ROOT / "tools" / "profile.py"
+        os.execve(sys.executable, [sys.executable, str(profile)], env)
+        return 0
+
+    disc_input = args.disc or os.environ.get("CUP28_DISC")
+    if not disc_input:
+        raise ImageFormatError("CUP28 requires --disc or CUP28_DISC")
+    disc = Path(disc_input).resolve(strict=True)
+    unit = Path(args.unit or os.environ.get("CUP28_UNIT")
+                or PROJECT_ROOT / "build" / "cup28").resolve()
+    qemu = Path(args.qemu or DEFAULT_QEMU).resolve()
+    if not qemu.is_file():
+        raise ImageFormatError("QEMU not found at %s. Run 'make qemu' first." % qemu)
+    display = args.display or os.environ.get("DISPLAY_BACKEND") or (
+        "cocoa,zoom-to-fit=on" if sys.platform == "darwin" else "sdl"
+    )
+    audio = args.audio
+    if audio is None and sys.platform == "darwin" and display.startswith("cocoa"):
+        audio = "coreaudio"
+    if audio == "none":
+        audio = None
+    track = args.track.resolve(strict=True) if args.track else None
+    firmware = cup28.prepare_firmware(disc, unit)
+    argv = cup28.qemu_argv(qemu, disc=disc, unit=unit, firmware=firmware,
+                         display=display, audio=audio, track=track, qmp=args.qmp)
+    os.execv(argv[0], argv)
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -183,7 +233,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="melco-nav-emu",
-        description="Volvo RTI MMM+ (CU-P2006) emulator",
+        description="Melco navigation emulator for CU-P2006 and CUP28",
     )
     parser.add_argument("--version", action="version", version=__version__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -216,6 +266,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("output")
     p.set_defaults(func=cmd_screenshot)
 
+    p = sub.add_parser("boot", help="boot a supported navigation unit")
+    p.add_argument("--model", choices=("cup2006", "cup28"), default="cup2006")
+    p.add_argument("--unit", type=Path, help="directory for persistent unit data")
+    p.add_argument("--display", help="QEMU display backend (e.g. none)")
+    p.add_argument("--disc", type=Path, help="CUP28 map DVD ISO (or CUP28_DISC)")
+    p.add_argument("--track", type=Path, help="CUP28 drive scenario CSV")
+    p.add_argument("--audio", help="CUP28 QEMU audio backend or none")
+    p.add_argument("--qmp", type=Path, help="CUP28 QMP UNIX socket path")
+    p.add_argument("--qemu", type=Path, help="CUP28 QEMU binary path")
+    p.set_defaults(func=cmd_boot)
+
     p = sub.add_parser("run", help="launch the emulator (raw; see `make boot` "
                                    "for the product boot)")
     p.add_argument("--qemu", help="path to qemu-system-sh4")
@@ -247,7 +308,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (OSError, ImageFormatError, QMPError) as exc:
+        parser.exit(1, "%s: %s\n" % (parser.prog, exc))
 
 
 if __name__ == "__main__":

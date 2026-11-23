@@ -201,15 +201,15 @@ static uint64_t cup2006_dg_bitblt(Cup2006MachineState *s, uint32_t pc,
     return written;
 }
 
+#define CUP2006_DG_MODE_WORK   (1u << 9)   /* POLYGON4/BITBLT only */
+#define CUP2006_DG_MODE_BLKE   (1u << 5)
+
 /*
  * POLYGON4C (op 0x80, SH7764 23.2.1(3)): [0x80|mode][0|Color][DX1|DY1]..
  * [DX4|DY4], six words; quad filled with Color, scanline even-odd, clipped
- * like BITBLT. Only convex quads are executed.
+ * like BITBLT.
  */
 static bool cup2006_dg_work_get(Cup2006MachineState *s, int x, int y);
-#define CUP2006_DG_MODE_WORK_BIT (1u << 9)  /* = CUP2006_DG_MODE_WORK below */
-#define CUP2006_DG_MODE_BLKE_BIT (1u << 5)
-
 /*
  * Coordinate transformation (SH7764 R01UH0360EJ0300 23.1.2(2), 23.3): each
  * vertex goes through the 3x3 float matrix at +0x104..+0x124 with GTROFSX/Y;
@@ -402,15 +402,15 @@ static uint64_t cup2006_dg_polygon4c(Cup2006MachineState *s, uint32_t pc,
     int px[4], py[4], i, y;
     int xmin = 0, ymin = 0, xmax, ymax;
     uint32_t dstrr, sc;
-    bool work = (mode & CUP2006_DG_MODE_WORK_BIT) != 0;
+    bool work = (mode & CUP2006_DG_MODE_WORK) != 0;
     uint64_t written = 0;
 
     bool alpha = (mode & CUP2006_DG_MODE_AE) != 0;
     unsigned alph = s->dg_reg[CUP2006_DG_ALPHR >> 2] & 0xff;
     bool argb = (s->dg_reg[CUP2006_DG_RCLR >> 2] & CUP2006_DG_RCLR_DPF) != 0;
 
-    if (mode & ~(CUP2006_DG_MODE_CLIP | CUP2006_DG_MODE_WORK_BIT |
-                 CUP2006_DG_MODE_BLKE_BIT | CUP2006_DG_MODE_MTRE |
+    if (mode & ~(CUP2006_DG_MODE_CLIP | CUP2006_DG_MODE_WORK |
+                 CUP2006_DG_MODE_BLKE | CUP2006_DG_MODE_MTRE |
                  CUP2006_DG_MODE_AE)) {
         cup2006_dg_skip(s, pc, "POLYGON4C draw-mode bits not modelled", w0);
         return 0;
@@ -492,9 +492,9 @@ static uint64_t cup2006_dg_polygon4ab(Cup2006MachineState *s, uint32_t pc,
     uint32_t op = w0 >> 24;
     uint32_t mode = w0 & 0x00ffffffu;
     uint32_t allowed = CUP2006_DG_MODE_CLIP | CUP2006_DG_MODE_STRANS |
-                       CUP2006_DG_MODE_STYLE | CUP2006_DG_MODE_WORK_BIT |
-                       CUP2006_DG_MODE_BLKE_BIT | CUP2006_DG_MODE_MTRE;
-    bool work = (mode & CUP2006_DG_MODE_WORK_BIT) != 0;
+                       CUP2006_DG_MODE_STYLE | CUP2006_DG_MODE_WORK |
+                       CUP2006_DG_MODE_BLKE | CUP2006_DG_MODE_MTRE;
+    bool work = (mode & CUP2006_DG_MODE_WORK) != 0;
     bool binary = (op == 0x81);
     uint32_t c1 = 0, c0 = 0, base, td_word, ofs_word;
     const uint32_t *v;
@@ -775,8 +775,6 @@ static uint64_t cup2006_dg_linec(Cup2006MachineState *s, uint32_t pc,
  * Bit order within a byte: LSB first.
  */
 #define CUP2006_DG_WSAR        0x054
-#define CUP2006_DG_MODE_WORK   (1u << 9)   /* POLYGON4/BITBLT only */
-#define CUP2006_DG_MODE_BLKE   (1u << 5)
 #define CUP2006_DG_MODE_EDG    (1u << 4)
 #define CUP2006_DG_MODE_EOS    (1u << 3)
 
@@ -1438,7 +1436,7 @@ static void cup2006_dg_start(Cup2006MachineState *s)
     }
     if (!src) {
         cup2006_dbg(s,  "cup2006: 2DG job #%" PRIu64 " done but INTEVT 0x8c0"
-                " has no INTC source (disptick=off)\n", s->dg_jobs);
+                " has no INTC source\n", s->dg_jobs);
         return;
     }
     if (!src->asserted) {

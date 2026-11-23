@@ -428,7 +428,7 @@ def _build_fat32(image: SparseImage, out: Path, size_mb: int, label: str,
         off = part + (reserved + n * fat_sectors) * SECTOR
         image[off:off + len(fat)] = fat
 
-    # --- directories (one cluster each; root is a cluster chain) ---------
+    # --- directories (one cluster each, root included) -------------------
     data_off = part + (reserved + 2 * fat_sectors) * SECTOR
     cluster_bytes = spc * SECTOR
 

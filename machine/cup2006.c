@@ -86,7 +86,7 @@ static hwaddr cpu_get_phys_page_debug(CPUState *cpu, vaddr addr)
 
 
 /* Battery-backed SRAM at the top of DRAM (256 MiB RAM: physical 0x0fff0000).
- * sramimage=<path> preloads up to 64 KiB there. */
+ * sramsave=<path> persists up to 64 KiB there. */
 #define CUP2006_SRAM_SIZE       0x00010000
 
 
@@ -234,8 +234,9 @@ static hwaddr cpu_get_phys_page_debug(CPUState *cpu, vaddr addr)
 #define CUP2006_MBX_TA_START     0x00000800
 #define CUP2006_MBX_ST_POLLED    (CUP2006_MBX_ST_TA_KICK | CUP2006_MBX_ST_TA_DONE)
 /* 3D render: table +0x608..+0x6E8 (400x234 at +0x654/+0x658, target +0x65C),
- * +0x680 = 1, then wait on the render event. STUB: the render is done when
- * the client unmasks +0x12C bit 2; no pixels are drawn. */
+ * +0x680 = 1, then wait on the render event. STUB: the render completes at
+ * the first +0x12C status read after the start, setting bits 2/6/8 at once;
+ * no pixels are drawn. */
 #define CUP2006_MBX_RENDER_START 0x00000680
 
 /* Display Unit (DU), SH7785-compatible register file at 0xFFF80000 (alias
@@ -363,7 +364,8 @@ static hwaddr cpu_get_phys_page_debug(CPUState *cpu, vaddr addr)
 
 /* SCIF at 0xFF92A000 (alias 0x1F92A000): SCFTDR +0x0c, SCFSR +0x10, SCFRDR
  * +0x14. STUB: SCFSR always reports TEND|TDFE; STUB: RX bytes are paced one
- * per ms; STUB: the EEPROM reply payload is a fixed all-zero image. */
+ * per ms; STUB: the EEPROM reply payload comes from the eeprom=<path>
+ * file (an erased 0xFFFF image when none is given). */
 #define CUP2006_SCIF_BASE        0xff92a000
 #define CUP2006_SCIF_A7_BASE     0x1f92a000
 #define CUP2006_SCIF_SIZE        0x00001000
@@ -453,7 +455,7 @@ static hwaddr cpu_get_phys_page_debug(CPUState *cpu, vaddr addr)
 
 /* ATA completion interrupt INTEVT 0x860, repurposed sh7750 INTC slot 0.
  * STUB: INTC2 enable/priority unmodelled, priority 1; STUB: the line
- * deasserts on a status-port read or the +0x88 ack write. */
+ * deasserts only on the +0x88 ack write (a status-port read does not). */
 #define CUP2006_ATA_INTEVT      0x0860
 #define CUP2006_ATA_INTC_PRIO   1
 
@@ -475,9 +477,6 @@ static hwaddr cpu_get_phys_page_debug(CPUState *cpu, vaddr addr)
 #define CUP2006_INTC2_ACK_OFF    0x00
 #define CUP2006_INTC2_ENABLE_OFF 0x04
 #define CUP2006_INTC2_GATE_OFF   0x1c
-
-/* Record every distinct read of the INTC2 stub window (offset, PC, size),
- * bounded, without changing any returned value. */
 
 #define CUP2006_ATA_DMA_NEND    0x02
 
@@ -785,8 +784,9 @@ struct Cup2006MachineState {
     bool selftest;
     bool intcinit;
     bool ata;
-    /* The Sub-CPU as the SCIF0 link's slave: the peer answers a guest ENQ
-     * or command frame with ACK 0x06; nothing is pushed unsolicited. */
+    /* The Sub-CPU as the SCIF0 link's slave: it answers a guest ENQ or
+     * command frame with ACK 0x06 and also pushes its own frames
+     * (startup report f9 82, vehicle status fd 89/fd 86, keys, wheel). */
     bool subpeer;
     uint8_t subpeer_frame[CUP2006_SCIF_RXQ];
     unsigned subpeer_frame_len;      /* bytes collected, 0 = between frames */
@@ -820,11 +820,11 @@ struct Cup2006MachineState {
     /* The Sub-CPU's startup status report: offered once, on the guest's
      * first ENQ (code f9 82, handled by the guest's map-update manager). */
     bool subpeer_report_queued;      /* the startup report has been offered */
-    /* ACC-off notification: F12 makes the Sub-CPU send NET OFF (f1 8a,
-     * data[0]=0x02); held separately so a boot-time reply cannot overwrite it. */
     int64_t drf_activity_ms;         /* guest time of the last flash program/erase */
     QEMUTimer *power_cut_timer;      /* ignition-off: Sub-CPU cuts power when idle */
     int64_t power_cut_armed_ms;
+    /* ACC-off notification: F12 makes the Sub-CPU send NET OFF (f1 8a,
+     * data[0]=0x02); held separately so a boot-time reply cannot overwrite it. */
     uint8_t subpeer_acc_off_stage;   /* ignition-off: 1 NET OFF, 2 DeviceMode Shutdown */
     /* The board key pad: a key press is a framed report from the Sub-CPU
      * peer on SCIF0, triggered only by a QEMU input event. */
@@ -842,8 +842,6 @@ struct Cup2006MachineState {
     struct intc_source *power_intc_src;
     bool power_irq_raised;
     uint64_t power_irq_raises;
-    /* diagnostic (odstap, default off): print the guest's own
-     * OutputDebugStringW argument, copied from guest memory; diagnosis only. */
     unsigned key_seq;            /* 0: ack+frame, 1: ENQ+frame, 2: frame */
     QemuInputHandlerState *key_handler;
     int key_waiting;             /* latched guest key code, -1 = none */
@@ -1026,10 +1024,6 @@ struct Cup2006MachineState {
     uint64_t disp_ack[CUP2006_DISP_LINES];
     uint64_t disp_done[CUP2006_DISP_LINES];
     uint64_t disp_enable[CUP2006_DISP_LINES];
-    uint64_t intc2_gate_reads;
-    uint64_t intc2_gate_pending_reads;
-    uint64_t intc2_gate_idle_reads;
-    uint64_t intc2_gate_acks;
     /* MBX status/enable/ack and the interrupt-source bookkeeping. */
     uint32_t mbx_status;            /* +0x12C latched status bits, 0 idle */
     uint32_t mbx_arm_seq;           /* +0x838 = 1 arms seen */
@@ -1477,7 +1471,7 @@ static void cup2006_init(MachineState *machine)
     sh7750_init(cpu, sysmem);
 
     /*
-     * STUB: present the MBX-armed surface as graphic console 0.
+     * STUB: present the display surface as graphic console 0.
      * Coldplugged here, before machine-ready, so QEMU's console ordering puts
      * this graphic console ahead of the text consoles (index 0).
  */
@@ -1645,7 +1639,7 @@ static void cup2006_init(MachineState *machine)
                                             &s->intc2_regs, 2);
         /* STUB: area 7 ignores the upper three physical address bits, so
          * the guest's 0xFFE00000 mapping presents 0x1FE0005C; alias the
-         * file there (the gate STUB above stays reachable). */
+         * file there (region there as well. */
         memory_region_init_io(&s->intc2_a7_regs, NULL,
                               &cup2006_intc2_a7_ops, s,
                               "cup2006-intc2-a7", CUP2006_INTC2_SIZE);
@@ -1655,8 +1649,7 @@ static void cup2006_init(MachineState *machine)
         cup2006_info(s, "cup2006: display lines: INTEVT 0x%03x is DU-driven"
                     " (DSSR/DIER), 0x%03x is MBX-driven (+0x12C status &"
                     " +0x130 enable, +0x134 ack), 0x%03x (2DG) is"
-                    " driven by the job-completion model (+0x000/+0x004,"
-                    ")",
+                    " driven by the job-completion model",
                     CUP2006_DISP_INTEVT_DTD1, CUP2006_DISP_INTEVT_MBX,
                     CUP2006_DISP_INTEVT_DTD0);
     } else {

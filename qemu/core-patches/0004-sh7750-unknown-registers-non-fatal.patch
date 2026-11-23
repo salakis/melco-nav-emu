@@ -1,5 +1,10 @@
 Subject: [PATCH 0004] sh7750: optionally keep undecoded on-chip registers non-fatal
 
+# melco-nav-emu core patch.
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (c) 2026 melco-nav-emu contributors
+# Modifies GPL-licensed QEMU sources; applied by scripts/qemu.sh.
+
 The CU-P2006 board's SoC is an SH7770, whose on-chip map is a superset of
 the SH7750 modelled by hw/sh4/sh7750.c.  Upstream aborts on any register the
 model does not decode, which stops the real boot as soon as a driver touches

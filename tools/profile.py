@@ -345,9 +345,17 @@ def qemu_argv(display="cocoa,zoom-to-fit=on", serial=("stdio",), extra=(),
     return _argv(unit, display, serial, extra, hdd)
 
 
+def default_display() -> str:
+    """The window backend when DISPLAY_BACKEND is unset: cocoa on macOS,
+    sdl elsewhere (cocoa does not exist off Darwin, so `make boot` would
+    fail on Linux)."""
+    if os.environ.get("DISPLAY_BACKEND"):
+        return os.environ["DISPLAY_BACKEND"]
+    return "cocoa,zoom-to-fit=on" if sys.platform == "darwin" else "sdl"
+
+
 if __name__ == "__main__":
     # zoom-to-fit makes QEMU's cocoa window resizable (the 400x234 panel
     # scales with it); without it the window is fixed at the guest's size.
-    argv = qemu_argv(display=os.environ.get("DISPLAY_BACKEND",
-                                            "cocoa,zoom-to-fit=on"))
+    argv = qemu_argv(display=default_display())
     os.execv(argv[0], argv + sys.argv[1:])

@@ -127,8 +127,6 @@ static uint64_t cup2006_mbx_read(Cup2006MachineState *s, hwaddr base,
     }
     if (off == CUP2006_MBX_STATUS) {
         value = s->mbx_status >> shift;
-        if (!s->mbx_status) {
-        }
         if (s->mbx_status & CUP2006_MBX_STATUS_DONE) {
             s->mbx_status_done_reads++;
             if (s->mbx_status_done_reads <= 8 ||

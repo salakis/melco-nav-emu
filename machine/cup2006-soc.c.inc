@@ -246,8 +246,9 @@ static const MemoryRegionOps cup2006_pcc_regs_ops = {
 };
 
 /*
- * Attribute memory at the CIS base (0x1B100000): the CIS image above,
- * read-only, plus the card config registers at +0x200 as plain storage.
+ * Attribute memory at the CIS base (0x1B100000): the CIS image above plus
+ * the card config registers at +0x200 as plain storage.  STUB: a real CIS
+ * is read-only; guest writes to the image are stored here instead.
  */
 #define CUP2006_PCC_CIS_LOG_MAX 32
 
@@ -272,20 +273,13 @@ static void cup2006_pcc_cis_note(Cup2006PccCis *c, hwaddr off,
     s->pcc_cis_log_nr[c->base]++;
     {
         CPUSH4State *env = current_cpu ? (CPUSH4State *)cpu_env(current_cpu) : NULL;
-        uint32_t caller = 0;
-        if (env) {
-            /* Read the caller's return address from SP+0x18 to log
-             * which function asks for the CIS bytes. */
-            cpu_memory_rw_debug(current_cpu, env->gregs[15] + 0x18,
-                                (uint8_t *)&caller, 4, false);
-        }
+
         cup2006_dbg(s,  "cup2006: pcc cis %s +0x%03" HWADDR_PRIx
                 " size=%u value=0x%" PRIx64 " abs=0x%08" HWADDR_PRIx
-                " pc=0x%08" PRIx32 " pr=0x%08" PRIx32
-                " caller=0x%08x\n",
+                " pc=0x%08" PRIx32 " pr=0x%08" PRIx32 "\n",
                 is_write ? "write" : "read", off, size, value,
                 CUP2006_PCC_BASE + base[c->base] + off,
-                env ? env->pc : 0, env ? env->pr : 0, caller);
+                env ? env->pc : 0, env ? env->pr : 0);
     }
 }
 
