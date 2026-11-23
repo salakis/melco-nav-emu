@@ -9,7 +9,7 @@ emulator replays these records through the GPS tracking-chip mailbox and
 gpslib computes its own fix.
 
     pocket_trk ... -log track.log track.bin
-    python3 tools/gps/export_replay.py track.log scenarios/<name>/drive.replay \\
+    python -m melco_nav_emu.gnss.export_replay track.log scenarios/<name>/drive.replay \\
         --gps-tow 292149
 
 Format (radio replay v1): 16-byte header "GNSSIQ1\\0",

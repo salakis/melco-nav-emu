@@ -19,7 +19,7 @@ The car drives the window at a constant --kmh from t=0.  Output in --out:
     track.gpx    the window's OSM geometry
     route.json   provenance: query, OSM data timestamp, way ids, straightness
 
-    python3 tools/gps/osm_route.py --ref A-4 --bbox 38.80,-3.75,39.40,-3.30 \\
+    python -m melco_nav_emu.gnss.osm_route --ref A-4 --bbox 38.80,-3.75,39.40,-3.30 \\
         --out scenarios/eu-a4 --seconds 180 [--kmh 110]
 
 Map data (c) OpenStreetMap contributors, ODbL 1.0.
@@ -242,7 +242,7 @@ def main():
         "".join("%.1f,%.9f,%.9f,%.3f\n" % r[:4] for r in rows))
     (out / "track.gpx").write_text(
         '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<gpx version="1.1" creator="melco-nav-emu tools/gps/osm_route.py">\n'
+        '<gpx version="1.1" creator="melco-nav-emu gnss/osm_route.py">\n'
         '<metadata><copyright author="OpenStreetMap contributors">'
         '<license>https://opendatacommons.org/licenses/odbl/1-0/</license>'
         '</copyright></metadata>\n<trk><name>%s</name><trkseg>\n' % args.ref +

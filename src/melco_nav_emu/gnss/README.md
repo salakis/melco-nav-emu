@@ -17,7 +17,7 @@ measured on that road. Nothing in it is a position.
    box, driven at constant speed, with heights from the Copernicus DEM.
 
    ```sh
-   python3 tools/gps/osm_route.py --ref A-4 --bbox 38.80,-3.75,39.40,-3.30 \
+   python -m melco_nav_emu.gnss.osm_route --ref A-4 --bbox 38.80,-3.75,39.40,-3.30 \
        --out scenarios/eu-a4 --seconds 180 --kmh 110
    ```
 
@@ -58,7 +58,7 @@ measured on that road. Nothing in it is a position.
    receiver's own positions are never read):
 
    ```sh
-   python3 tools/gps/export_replay.py drive.log scenarios/eu-a4/drive.replay \
+   python -m melco_nav_emu.gnss.export_replay drive.log scenarios/eu-a4/drive.replay \
        --gps-tow 292155
    ```
 
