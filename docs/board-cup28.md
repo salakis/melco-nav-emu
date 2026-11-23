@@ -31,7 +31,9 @@ verified path.
 The replay drives the receiver fix, cumulative MOST wheel count and analog
 gyro sample from one virtual clock. CUP28 receives position and fix validity
 over MOST `52/E00` and satellite status over `52/E01`. This is a receiver
-model with a fixed satellite pattern while a fix is available. The turn and
+model with a fixed satellite pattern while a fix is available.  The
+receiver's clock is made up (STUB): it starts at a fixed 2026-11-22 12:00:00
+and advances monotonically with virtual time, never jumping back. The turn and
 distance scales are approximations. The firmware's locator handles loss of fix
 and dead reckoning, so path error can accumulate during an outage.
 

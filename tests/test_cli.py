@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from melco_nav_emu import cli
 
 
@@ -87,3 +89,53 @@ def test_info_finds_firmware_of_any_version(tmp_path: Path, capsys,
     out = capsys.readouterr().out
     assert "CUP2006.SHx.ORG_v00009999.nb0" in out
     assert "dvd1/LOADING.KWI" in out and "missing" in out
+
+
+def test_loading_bad_file_is_a_one_line_error(tmp_path: Path, capsys) -> None:
+    bad = tmp_path / "bad.kwi"
+    bad.write_bytes(b"xy")
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["loading", str(bad)])
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "LOADING.KWI is too short" in err
+    assert "Traceback" not in err
+
+
+def test_boot_cup28_bad_disc_is_a_one_line_error(tmp_path: Path, capsys) -> None:
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["boot", "--model", "cup28", "--disc", str(tmp_path / "no.iso")])
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "No such file" in err
+    assert "Traceback" not in err
+
+
+def test_info_lists_cup28_disc(tmp_path: Path, capsys, monkeypatch) -> None:
+    monkeypatch.setattr(cli, "IMAGES", tmp_path)
+    monkeypatch.setenv("CUP28_DISC", str(tmp_path / "disc.iso"))
+    assert cli.main(["info"]) == 0
+    out = capsys.readouterr().out
+    assert "CUP28 input" in out and "disc.iso" in out and "missing" in out
+
+
+def test_screenshot_resolves_relative_output(tmp_path: Path, monkeypatch) -> None:
+    sent = {}
+
+    class FakeQMP:
+        def __init__(self, address):
+            sent["address"] = address
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def screendump(self, filename):
+            sent["file"] = filename
+
+    monkeypatch.setattr(cli, "QMPClient", FakeQMP)
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["screenshot", "unix:/tmp/q.sock", "shot.png"]) == 0
+    assert sent["file"] == str(tmp_path / "shot.png")
