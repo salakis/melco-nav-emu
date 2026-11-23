@@ -29,6 +29,12 @@ static uint64_t cup2006_dg_read_at(Cup2006MachineState *s, hwaddr base,
  * modelled opcodes execute; the rest are logged and skipped.
  */
 #define CUP2006_DG_WALK_MAX      100000
+/* The panel surface the DU scanout presents: 512 pixels per 1024-byte row
+ * at 16 bpp, 234 lines.  Every drawing loop clips to it exactly (in addition
+ * to the guest's clip window), so one packet cannot loop billions of times
+ * on a huge SCLMAR; CUP2006_DG_WALK_MAX stays as the packet-level safety net. */
+#define CUP2006_DG_SURF_W 512
+#define CUP2006_DG_SURF_H 234
 
 static uint8_t *cup2006_dg_ram_ptr(Cup2006MachineState *s, uint32_t addr,
                                    uint32_t len)
@@ -126,6 +132,8 @@ static uint64_t cup2006_dg_bitblt(Cup2006MachineState *s, uint32_t pc,
         xmax = MIN(xmax, (int)(mx >> 16));
         ymax = MIN(ymax, (int)(mx & 0xffff));
     }
+    xmax = MIN(xmax, CUP2006_DG_SURF_W - 1);
+    ymax = MIN(ymax, CUP2006_DG_SURF_H - 1);
     xmin = MAX(xmin, dx0);
     ymin = MAX(ymin, dy0);
     xmax = MIN(xmax, dx0 + nx - 1);
@@ -257,6 +265,13 @@ static void cup2006_dg_xf(Cup2006MachineState *s, uint32_t mode, int *x,
         }
         rx = tx / w + (int16_t)s->dg_reg[CUP2006_DG_GTROFSX >> 2];
         ry = ty / w + (int16_t)s->dg_reg[CUP2006_DG_GTROFSY >> 2];
+    }
+    /* NaN/inf would make the int conversion undefined; clamp to 0 first. */
+    if (!isfinite(rx)) {
+        rx = 0;
+    }
+    if (!isfinite(ry)) {
+        ry = 0;
     }
     *x = (int)MAX(-32768.0, MIN(32767.0, floor(rx)));
     *y = (int)MAX(-32768.0, MIN(32767.0, floor(ry)));
@@ -437,6 +452,8 @@ static uint64_t cup2006_dg_polygon4c(Cup2006MachineState *s, uint32_t pc,
         xmax = MIN(xmax, (int)(mx >> 16));
         ymax = MIN(ymax, (int)(mx & 0xffff));
     }
+    xmax = MIN(xmax, CUP2006_DG_SURF_W - 1);
+    ymax = MIN(ymax, CUP2006_DG_SURF_H - 1);
     ymin = MAX(ymin, MIN(MIN(py[0], py[1]), MIN(py[2], py[3])));
     ymax = MIN(ymax, MAX(MAX(py[0], py[1]), MAX(py[2], py[3])));
     if (xmin > xmax || ymin > ymax) {
@@ -565,6 +582,8 @@ static uint64_t cup2006_dg_polygon4ab(Cup2006MachineState *s, uint32_t pc,
         xmax = MIN(xmax, (int)(mx >> 16));
         ymax = MIN(ymax, (int)(mx & 0xffff));
     }
+    xmax = MIN(xmax, CUP2006_DG_SURF_W - 1);
+    ymax = MIN(ymax, CUP2006_DG_SURF_H - 1);
     qx0 = MIN(MIN(px[0], px[1]), MIN(px[2], px[3]));
     qx1 = MAX(MAX(px[0], px[1]), MAX(px[2], px[3]));
     qy0 = MIN(MIN(py[0], py[1]), MIN(py[2], py[3]));
@@ -714,6 +733,8 @@ static uint64_t cup2006_dg_linec(Cup2006MachineState *s, uint32_t pc,
         xmax = MIN(xmax, (int)(mx >> 16));
         ymax = MIN(ymax, (int)(mx & 0xffff));
     }
+    xmax = MIN(xmax, CUP2006_DG_SURF_W - 1);
+    ymax = MIN(ymax, CUP2006_DG_SURF_H - 1);
     for (i = 0; i < n; i++) {
         uint32_t v;
         int x, y;
@@ -847,6 +868,8 @@ static void cup2006_dg_work_clip(Cup2006MachineState *s, uint32_t mode,
         *xmax = MIN(*xmax, (int)(mx >> 16));
         *ymax = MIN(*ymax, (int)(mx & 0xffff));
     }
+    *xmax = MIN(*xmax, CUP2006_DG_SURF_W - 1);
+    *ymax = MIN(*ymax, CUP2006_DG_SURF_H - 1);
 }
 
 /* 1-bit line at work coordinates (LINEWC, FTRAPC's EDG): Bresenham, final
@@ -1086,6 +1109,8 @@ static uint64_t cup2006_dg_bitbltb(Cup2006MachineState *s, uint32_t pc,
         xmax = MIN(xmax, (int)(mx >> 16));
         ymax = MIN(ymax, (int)(mx & 0xffff));
     }
+    xmax = MIN(xmax, CUP2006_DG_SURF_W - 1);
+    ymax = MIN(ymax, CUP2006_DG_SURF_H - 1);
     xmin = MAX(xmin, dx0);
     ymin = MAX(ymin, dy0);
     xmax = MIN(xmax, dx0 + nx - 1);
