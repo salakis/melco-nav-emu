@@ -1,18 +1,18 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Copyright (c) 2026 melco-nav-emu contributors
-"""The product boot profile: one place that defines how the CU-P2006 boots.
+"""The CU-P2006 board: one place that defines how the unit boots.
 
 Importing this module has no side effects: images are looked up, built and
-checked only when a boot command line is made (qemu_argv, first_power_on).
+checked only when a boot command line is made (prepare, first_power_on).
 """
 from pathlib import Path
 import os
 import subprocess
 import sys
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:      # `make boot` runs this file as a script
-    sys.path.insert(0, str(ROOT))
+from ..unit import POWERED_ON
+
+ROOT = Path(__file__).resolve().parents[3]
 QEMU = ROOT / "qemu/src/build/qemu-system-sh4"
 # The NK image `make flatten` carves from the disc set's LOADING.KWI;
 # scripts/flatten-firmware.py names it <module name>_v<version>.nb0, e.g.
@@ -134,37 +134,122 @@ def ensure_hdd() -> Path:
     return HDD_EMPTY
 
 
-# Board model options for the product boot.  Each stands for hardware the
-# real unit has: the self-test ADC sample (board revision, GPS antenna),
-# the boot ROM's INTC setup, the RTC, the ATA disk, the Sub-CPU on the SUB1:
-# link (power, car status and keys arrive as its frames), the DVD drive's
-# mecha-link interrupt, the vehicle-signal sensors, and F12 as the ACC key.
-# The disk image (hddimage=) is per unit: see unit_machine().
-MACHINE = ["cup2006", "selftest=on", "intcinit=on", "rtc=on", "ata=on",
-           "subpeer=on",
-           "dvd5irq=on",
-           "carsig=on",
-           "acckey=on"]
-# A map disc is in the drive, as in a real installed unit; F11 ejects it and
-# inserts the next one (disc 2, then disc 1 again), as during a map install.
-if DISC.is_file():
-    MACHINE.append("dvdimage=%s" % DISC)
-if DISC.is_file() and DISC2.is_file():
-    MACHINE.append("dvdnext=%s" % DISC2)
 # The car on the MOST bus tells the unit its market via the Sub-CPU.  Default
 # follows the disc set: NA-2450 -> 06 (North America), anything else -> 04
 # (Europe); CUP2006_CARMARKET=<hex> overrides (a0 = Aston Martin marque).
 CARMARKET = os.environ.get("CUP2006_CARMARKET",
                            "06" if "NA-" in DISC.name else "04")
-MACHINE.append("carmarket=%s" % CARMARKET)
-# The MBX 3D core is not emulated, so Navi's 3D car marker is missing from
-# the 3D map view; CUP2006_CARMARKER=1 draws an approximation of it (a STUB
-# whose colours and shading are the emulator's, see machine/cup2006.c).
-if os.environ.get("CUP2006_CARMARKER", "") not in ("", "0"):
-    MACHINE.append("carmarker=on")
+
+
+def _machine_opts():
+    """Board model options for the product boot.  Each stands for hardware
+    the real unit has: the self-test ADC sample (board revision, GPS
+    antenna), the boot ROM's INTC setup, the RTC, the ATA disk, the Sub-CPU
+    on the SUB1: link (power, car status and keys arrive as its frames), the
+    DVD drive's mecha-link interrupt, the vehicle-signal sensors, and F12
+    as the ACC key.  The disk image (hddimage=) is per unit: unit_machine().
+
+    A map disc is in the drive, as in a real installed unit; F11 ejects it
+    and inserts the next one (disc 2, then disc 1 again), as during a map
+    install.  The MBX 3D core is not emulated, so Navi's 3D car marker is
+    missing from the 3D map view; CUP2006_CARMARKER=1 draws an approximation
+    of it (a STUB whose colours and shading are the emulator's, see
+    machine/cup2006.c)."""
+    opts = ["cup2006", "selftest=on", "intcinit=on", "rtc=on", "ata=on",
+            "subpeer=on", "dvd5irq=on", "carsig=on", "acckey=on"]
+    if DISC.is_file():
+        opts.append("dvdimage=%s" % DISC)
+    if DISC.is_file() and DISC2.is_file():
+        opts.append("dvdnext=%s" % DISC2)
+    opts.append("carmarket=%s" % CARMARKET)
+    if os.environ.get("CUP2006_CARMARKER", "") not in ("", "0"):
+        opts.append("carmarker=on")
+    return opts
+
+
+MACHINE = _machine_opts()
+
+
+def _set_disc(disc):
+    """Override the disc set at runtime (--disc / MELCO_DISC): disc 1, with
+    disc 2 as its _2 sibling when that file exists."""
+    global DISC, DISC2, CARMARKET, MACHINE
+    DISC = Path(disc)
+    name = DISC.name
+    DISC2 = Path(str(DISC).replace("_1.", "_2.")) if "_1." in name else DISC
+    CARMARKET = os.environ.get("CUP2006_CARMARKET",
+                               "06" if "NA-" in DISC.name else "04")
+    MACHINE = _machine_opts()
 # One unit's persistent state (flash, battery RAM, battery SRAM, EEPROM),
-# kept across boots like the car's.  CUP2006_UNIT=<dir> picks another unit.
+# kept across boots like the car's.  CUP2006_UNIT=<dir> (or MELCO_UNIT, see
+# the CLI) picks another unit.
 UNIT = Path(os.environ.get("CUP2006_UNIT", str(ROOT / "build" / "unit")))
+DEFAULT_UNIT = UNIT
+
+
+# The guest's APM (map-install) backup areas start with this ASCII version
+# date, followed by two records.  Flash holds three such areas (0x1e40800,
+# 0x1e80800, 0x1ec0800); battery RAM holds one, at 0x40800, which
+# corresponds to the first flash area.  The status checks below read that
+# pair.
+APM_DATE = b"20080207"
+FLASH_APM_AREA = 0x1e40800    # first APM area in flash
+BKRAM_APM_AREA = 0x40800      # the APM area in battery RAM (the one the
+                              # guest reads on a production board)
+RECORD = 0x540                # record stride; body at area + 0x10 + n * RECORD
+MAPDWLSTS = 0x370             # install-status byte in the record body
+
+
+def _dwl_sts(path, area):
+    path = Path(path)
+    if not path.is_file():
+        return None
+    want = 0x10 + 2 * RECORD
+    with open(path, "rb") as f:
+        f.seek(area)
+        data = f.read(want)
+    if len(data) < want or data[:8] != APM_DATE:
+        return None
+    return [data[0x10 + n * RECORD + MAPDWLSTS] for n in (0, 1)]
+
+
+def map_dwl_sts(flash):
+    """Install status of both records of the first APM area in flash, or
+    None if the area is not guest-formatted."""
+    return _dwl_sts(flash, FLASH_APM_AREA)
+
+
+def bkram_dwl_sts(bkram):
+    """Install status of both APM records in battery RAM, or None if the
+    guest has not formatted its backup areas there yet."""
+    return _dwl_sts(bkram, BKRAM_APM_AREA)
+
+
+def prepare_unit(unit: Path) -> None:
+    """Land the map-install record in the unit's guest-formatted APM areas
+    (flash and battery RAM), powering a new unit on once headless first so
+    the guest formats its battery RAM.  Called by melco_nav_emu.unit.prepare.
+
+    STUB (the HDD this emulator serves already holds the complete install,
+    so the unit's record says so): status 0 ("install complete") plus the
+    disc's map identity, re-landed at every boot in every guest-formatted
+    APM area by scripts/apm_record_seed.py.
+    """
+    unit = Path(unit)
+    bkram = unit / "bkram.bin"
+    if bkram_dwl_sts(bkram) is None and not (unit / POWERED_ON).exists():
+        first_power_on(unit, hdd=unit_hdd(unit))
+    stores = [p for p, sts in ((unit / "flash.img", map_dwl_sts(unit / "flash.img")),
+                               (bkram, bkram_dwl_sts(bkram))) if sts is not None]
+    if not stores:
+        return                    # the guest formats it on this boot
+    for store in stores:
+        subprocess.check_call([sys.executable,
+                               str(ROOT / "scripts/apm_record_seed.py"),
+                               str(store), str(store)],
+                              stdout=subprocess.DEVNULL)
+    (unit / ".installed").write_text(
+        "map-install record landed (boards/cup2006.py prepare_unit)\n")
 
 
 def gps_machine():
@@ -232,7 +317,7 @@ def audiodev_id(extra):
 def _argv(unit, display, serial, extra, hdd):
     if not QEMU.is_file():
         raise SystemExit("profile: %s not found; run `make qemu` first" % QEMU)
-    machine = list(MACHINE) + unit_machine(unit, hdd) + gps_machine()
+    machine = _machine_opts() + unit_machine(unit, hdd) + gps_machine()
     extra = [str(a) for a in extra]
     # Sound (machine/cup2006-audio.c.inc): a window run plays through the
     # host's audio; headless runs count frames only, unless the caller names
@@ -286,7 +371,6 @@ def first_power_on(unit, timeout=120, hdd=None):
     repeat this power-on.
     """
     import time
-    from tools.unit import POWERED_ON, bkram_dwl_sts
     unit = Path(unit)
     unit.mkdir(parents=True, exist_ok=True)
     if hdd is None:
@@ -333,16 +417,40 @@ def first_power_on(unit, timeout=120, hdd=None):
     return False
 
 
-def qemu_argv(display="cocoa,zoom-to-fit=on", serial=("stdio",), extra=(),
-              unit=None):
-    from tools.unit import prepare
-    unit = Path(unit) if unit is not None else UNIT
+def _escape(value: object) -> str:
+    return str(value).replace(",", ",,")
+
+
+def _default_unit() -> Path:
+    return Path(os.environ.get("MELCO_UNIT") or UNIT)
+
+
+def prepare(unit, args=None) -> dict:
+    """Prepare a unit's media and return what qemu_argv needs: the prepared
+    unit directory (flash, battery RAM, SRAM, EEPROM; melco_nav_emu.unit)
+    and the disk it boots with."""
+    from .. import unit as unit_mod
+    if args is not None:
+        if getattr(args, "disc", None):
+            _set_disc(args.disc)
+        if getattr(args, "qemu", None):
+            global QEMU
+            QEMU = Path(args.qemu)
+    unit = Path(unit) if unit is not None else _default_unit()
     if not unit.is_absolute():
         unit = ROOT / unit
     hdd = unit_hdd(unit)
-    unit = prepare(unit,
-                   first_power_on=lambda u: first_power_on(u, hdd=hdd))
-    return _argv(unit, display, serial, extra, hdd)
+    unit_mod.prepare(unit, "cup2006")
+    return {"unit": unit, "hdd": hdd}
+
+
+def qemu_argv(media: dict, *, display="cocoa,zoom-to-fit=on",
+              serial=("stdio",), extra=(), qmp=None) -> list:
+    """The QEMU command line for a unit prepared by prepare()."""
+    argv = _argv(media["unit"], display, serial, extra, media["hdd"])
+    if qmp is not None:
+        argv += ["-qmp", "unix:%s,server=on,wait=off" % _escape(qmp)]
+    return argv
 
 
 def default_display() -> str:
@@ -352,10 +460,3 @@ def default_display() -> str:
     if os.environ.get("DISPLAY_BACKEND"):
         return os.environ["DISPLAY_BACKEND"]
     return "cocoa,zoom-to-fit=on" if sys.platform == "darwin" else "sdl"
-
-
-if __name__ == "__main__":
-    # zoom-to-fit makes QEMU's cocoa window resizable (the 400x234 panel
-    # scales with it); without it the window is fixed at the guest's size.
-    argv = qemu_argv(display=default_display())
-    os.execv(argv[0], argv + sys.argv[1:])

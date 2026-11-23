@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from . import __version__, cup28
+from . import __version__, boards
 from .images import ImageFormatError, flatten_b000ff, load_sce, parse_b000ff
 from .loading import parse_loading
 from .qmp import QMPClient, QMPError
@@ -129,40 +129,38 @@ def cmd_screenshot(args: argparse.Namespace) -> int:
 
 
 def cmd_boot(args: argparse.Namespace) -> int:
+    board = boards.get(args.model)
+    # Environment fallbacks, in this order: MELCO_DISC/MELCO_UNIT, then the
+    # board's own <MODEL>_DISC/<MODEL>_UNIT variables.
+    if args.unit is None:
+        args.unit = (os.environ.get("MELCO_UNIT")
+                     or os.environ.get("%s_UNIT" % args.model.upper()))
+    if args.disc is None:
+        disc_env = os.environ.get("MELCO_DISC") or (
+            os.environ.get("CUP28_DISC") if args.model == "cup28" else
+            os.environ.get("CUP2006_DISC1"))
+        args.disc = Path(disc_env) if disc_env else None
+    if args.unit is not None:
+        args.unit = Path(args.unit)
+    if args.display is None:
+        args.display = os.environ.get("DISPLAY_BACKEND") or (
+            "cocoa,zoom-to-fit=on" if sys.platform == "darwin" else "sdl")
     if args.model == "cup2006":
-        if args.disc or args.track or args.qmp or args.audio is not None or args.qemu:
-            raise ImageFormatError("for CU-P2006 media and hardware options, use tools/profile.py")
-        env = os.environ.copy()
-        if args.unit:
-            env["CUP2006_UNIT"] = str(args.unit.resolve())
-        if args.display:
-            env["DISPLAY_BACKEND"] = args.display
-        profile = PROJECT_ROOT / "tools" / "profile.py"
-        os.execve(sys.executable, [sys.executable, str(profile)], env)
-        return 0
-
-    disc_input = args.disc or os.environ.get("CUP28_DISC")
-    if not disc_input:
-        raise ImageFormatError("CUP28 requires --disc or CUP28_DISC")
-    disc = Path(disc_input).resolve(strict=True)
-    unit = Path(args.unit or os.environ.get("CUP28_UNIT")
-                or PROJECT_ROOT / "build" / "cup28").resolve()
-    qemu = Path(args.qemu or DEFAULT_QEMU).resolve()
-    if not qemu.is_file():
-        raise ImageFormatError("QEMU not found at %s. Run 'make qemu' first." % qemu)
-    display = args.display or os.environ.get("DISPLAY_BACKEND") or (
-        "cocoa,zoom-to-fit=on" if sys.platform == "darwin" else "sdl"
-    )
-    audio = args.audio
-    if audio is None and sys.platform == "darwin" and display.startswith("cocoa"):
-        audio = "coreaudio"
-    if audio == "none":
-        audio = None
-    track = args.track.resolve(strict=True) if args.track else None
-    firmware = cup28.prepare_firmware(disc, unit)
-    argv = cup28.qemu_argv(qemu, disc=disc, unit=unit, firmware=firmware,
-                         display=display, audio=audio, track=track, qmp=args.qmp)
+        if args.track or args.audio is not None:
+            raise ImageFormatError(
+                "for CU-P2006 media options use CUP2006_SCENARIO; hardware "
+                "options go after -- (extra QEMU arguments)")
+    else:
+        if args.audio is None and sys.platform == "darwin" \
+                and args.display.startswith("cocoa"):
+            args.audio = "coreaudio"
+        if args.audio == "none":
+            args.audio = None
+    media = board.prepare(args.unit, args)
+    argv = board.qemu_argv(media, display=args.display, serial=("stdio",),
+                           extra=args.extra, qmp=args.qmp)
     os.execv(argv[0], argv)
+    return 0
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -173,7 +171,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 1
 
     # The product boot (discs, HDD, unit state) is `make boot`
-    # (tools/profile.py); this launches a raw machine for experiments.
+    # (boards registry + this CLI); this launches a raw machine for experiments.
     # Disks and discs attach through machine properties (hddimage=,
     # dvdimage=), not -drive/-cdrom: the sh4 machine has no IDE bus.
     cmd: List[str] = [
@@ -267,14 +265,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_screenshot)
 
     p = sub.add_parser("boot", help="boot a supported navigation unit")
-    p.add_argument("--model", choices=("cup2006", "cup28"), default="cup2006")
+    p.add_argument("--model", choices=sorted(boards.BOARDS), default="cup2006")
     p.add_argument("--unit", type=Path, help="directory for persistent unit data")
     p.add_argument("--display", help="QEMU display backend (e.g. none)")
-    p.add_argument("--disc", type=Path, help="CUP28 map DVD ISO (or CUP28_DISC)")
+    p.add_argument("--disc", type=Path, help="map disc ISO (CUP28, or the CU-P2006 disc 1)")
     p.add_argument("--track", type=Path, help="CUP28 drive scenario CSV")
     p.add_argument("--audio", help="CUP28 QEMU audio backend or none")
-    p.add_argument("--qmp", type=Path, help="CUP28 QMP UNIX socket path")
-    p.add_argument("--qemu", type=Path, help="CUP28 QEMU binary path")
+    p.add_argument("--qmp", type=Path, help="QMP UNIX socket path")
+    p.add_argument("--qemu", type=Path, help="QEMU binary path")
+    p.add_argument("extra", nargs="*", default=[],
+                   help="extra QEMU arguments, after -- (e.g. -trace 'cup28_*')")
     p.set_defaults(func=cmd_boot)
 
     p = sub.add_parser("run", help="launch the emulator (raw; see `make boot` "

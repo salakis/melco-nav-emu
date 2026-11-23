@@ -6,7 +6,8 @@ import struct
 
 import pytest
 
-from melco_nav_emu import cli, cup28
+from melco_nav_emu import cli
+from melco_nav_emu.boards import cup28
 from melco_nav_emu.images import ImageFormatError
 from melco_nav_emu.iso import read_root_file
 
@@ -105,16 +106,48 @@ def test_cli_boot_uses_persistent_unit_and_unmodified_firmware(tmp_path, monkeyp
     assert kernel.read_bytes() == CODE + b"\x00\x00"
 
 
-def test_default_boot_uses_existing_cup2006_profile(tmp_path, monkeypatch):
-    calls = []
-    monkeypatch.setattr(cli.os, "execve",
-                        lambda path, argv, env: calls.append((argv, env)))
+def test_default_boot_goes_through_the_cup2006_board(tmp_path, monkeypatch):
+    from melco_nav_emu.boards import cup2006
+    qemu = tmp_path / "qemu-system-sh4"
+    qemu.write_text("")
+    monkeypatch.setattr(cup2006, "QEMU", qemu)
+    monkeypatch.setattr(cup2006, "first_power_on", lambda *a, **k: None)
+    monkeypatch.setattr(cup2006, "unit_hdd", lambda u: tmp_path / "hdd.img")
+    command = []
+    monkeypatch.setattr(cli.os, "execv", lambda path, argv: command.extend(argv))
     unit = tmp_path / "cup2006"
     cli.main(["boot", "--unit", str(unit), "--display", "none"])
-    [(argv, env)] = calls
-    assert argv[-1] == str(cli.PROJECT_ROOT / "tools" / "profile.py")
-    assert env["CUP2006_UNIT"] == str(unit)
-    assert env["DISPLAY_BACKEND"] == "none"
+    assert command[0] == str(qemu)
+    machine = command[command.index("-M") + 1]
+    assert machine.startswith("cup2006,")
+    assert "drfimage=%s" % (unit / "flash.img") in machine
+    assert "bkram=%s" % (unit / "bkram.bin") in machine
+    assert "hddimage=%s" % (tmp_path / "hdd.img") in machine
+    assert command[command.index("-display") + 1] == "none"
+    assert command[command.index("-serial") + 1] == "stdio"
+
+
+def test_boot_cup2006_unit_env_fallbacks(tmp_path, monkeypatch):
+    from melco_nav_emu.boards import cup2006
+    qemu = tmp_path / "qemu-system-sh4"
+    qemu.write_text("")
+    monkeypatch.setattr(cup2006, "QEMU", qemu)
+    monkeypatch.setattr(cup2006, "first_power_on", lambda *a, **k: None)
+    monkeypatch.setattr(cup2006, "unit_hdd", lambda u: tmp_path / "hdd.img")
+    command = []
+    monkeypatch.setattr(cli.os, "execv", lambda path, argv: command.extend(argv))
+    # MELCO_UNIT wins over CUP2006_UNIT.
+    monkeypatch.setenv("CUP2006_UNIT", str(tmp_path / "old-unit"))
+    monkeypatch.setenv("MELCO_UNIT", str(tmp_path / "melco-unit"))
+    cli.main(["boot", "--display", "none"])
+    machine = command[command.index("-M") + 1]
+    assert "drfimage=%s" % (tmp_path / "melco-unit" / "flash.img") in machine
+    # ... and CUP2006_UNIT is used when MELCO_UNIT is unset.
+    monkeypatch.delenv("MELCO_UNIT")
+    del command[:]
+    cli.main(["boot", "--display", "none"])
+    machine = command[command.index("-M") + 1]
+    assert "drfimage=%s" % (tmp_path / "old-unit" / "flash.img") in machine
 
 
 def test_shipped_scenarios_match_the_cup28_track_format():

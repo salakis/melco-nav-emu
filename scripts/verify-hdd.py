@@ -21,8 +21,8 @@ _spec.loader.exec_module(hddmap)
 SECTOR = 512
 # Installed paths where the guest's own open differs from installed_path()'s
 # naming rule (the product profile's MAP_DEST).
-sys.path.insert(0, str(ROOT))
-from tools.profile import MAP_DEST  # noqa: E402
+sys.path.insert(0, str(ROOT / "src"))
+from melco_nav_emu.boards.cup2006 import MAP_DEST  # noqa: E402
 
 
 # The guest's installer stages every target under HDD2\UPDATE\ first and

@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -30,10 +31,7 @@ from typing import Dict, List, Optional, Tuple
 from .qmp import QMPClient, QMPError
 
 ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:      # tools.* lives at the repo root (phase 0)
-    sys.path.insert(0, str(ROOT))
 
-QEMU = ROOT / "qemu/src/build/qemu-system-sh4"
 OUT_BASE = ROOT / "build" / "bootcheck"
 # A pristine per-board unit to copy, if present (template/<board>/unit).
 TEMPLATE = OUT_BASE / "template"
@@ -92,49 +90,38 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _board_argv(board: str, unit: Path, outdir: Path, disc: Optional[str],
-                scenario: Optional[str], icount: Optional[str]) -> List[str]:
-    """The QEMU command line from the board's launcher, plus the bootcheck's
+def _board_argv(board_name: str, unit: Path, outdir: Path,
+                disc: Optional[str], scenario: Optional[str],
+                icount: Optional[str]) -> List[str]:
+    """The QEMU command line from the board registry, plus the bootcheck's
     QMP socket (relative to the output directory) and MMIO trace events."""
-    qmp_sock = "unix:qmp.sock,server=on,wait=off"
+    from . import boards
+    board = boards.get(board_name)
+    if board_name == "cup2006" and scenario:
+        # The cup2006 launcher takes a scenario by name (scenarios/<name>/ or
+        # build/gps/<name>/), so name it; the launcher adds gnssreplay= and
+        # gpstrack= itself.
+        scen = Path(scenario).resolve()
+        if scen.parent.parent not in (ROOT / "scenarios",
+                                      ROOT / "build" / "gps"):
+            raise SystemExit(
+                "bootcheck: --scenario for cup2006 must be a scenario's "
+                "sensors.csv under scenarios/ or build/gps/")
+        os.environ["CUP2006_SCENARIO"] = scen.parent.name
+        scenario = None
+    args = argparse.Namespace(disc=disc, unit=str(unit), track=scenario,
+                              audio=None, qemu=None, qmp=None)
+    media = board.prepare(unit, args)
     trace = []
     for event in TRACE_EVENTS:
         trace += ["-trace", event]
-    if board == "cup2006":
-        import tools.profile as profile
-        console = outdir / "console.log"
-        extra = ["-qmp", qmp_sock] + trace
-        if icount:
-            extra += ["-icount", icount]
-        if scenario:
-            # The launcher takes a scenario by name (scenarios/<name>/ or
-            # build/gps/<name>/), so name it; the launcher adds gnssreplay=
-            # and gpstrack= itself.
-            scen = Path(scenario).resolve()
-            if scen.parent.parent not in (ROOT / "scenarios",
-                                          ROOT / "build" / "gps"):
-                raise SystemExit(
-                    "bootcheck: --scenario for cup2006 must be a scenario's "
-                    "sensors.csv under scenarios/ or build/gps/")
-            import os
-            os.environ["CUP2006_SCENARIO"] = scen.parent.name
-        return profile.qemu_argv(display="none", serial=(str(console),),
-                                 extra=extra, unit=unit)
-    if board == "cup28":
-        from . import cup28
-        disc_input = disc or __import__("os").environ.get("CUP28_DISC")
-        if not disc_input:
-            raise SystemExit("bootcheck: cup28 needs --disc or $CUP28_DISC")
-        disc_path = Path(disc_input).resolve(strict=True)
-        firmware = cup28.prepare_firmware(disc_path, unit)
-        track = Path(scenario).resolve(strict=True) if scenario else None
-        argv = cup28.qemu_argv(QEMU, disc=disc_path, unit=unit,
-                               firmware=firmware, display="none", audio=None,
-                               track=track, qmp="qmp.sock")
-        if icount:
-            argv[argv.index("-icount") + 1] = icount
-        return argv + trace
-    raise SystemExit("bootcheck: unknown board %r" % board)
+    console = outdir / "console.log"
+    serial = (str(console),) if board_name == "cup2006" else ()
+    argv = board.qemu_argv(media, display="none", serial=serial, extra=trace,
+                           qmp="qmp.sock")
+    if icount:
+        argv[argv.index("-icount") + 1] = icount
+    return argv
 
 
 def _fresh_unit(outdir: Path, unit_arg: Optional[str], board: str) -> Path:

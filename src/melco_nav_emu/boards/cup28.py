@@ -4,13 +4,18 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import tempfile
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
-from .images import ImageFormatError, flatten_b000ff, parse_b000ff
-from .iso import read_root_file
-from .loading import parse_loading
+from ..images import ImageFormatError, flatten_b000ff, parse_b000ff
+from ..iso import read_root_file
+from ..loading import parse_loading
+
+ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_QEMU = ROOT / "qemu" / "src" / "build" / "qemu-system-sh4"
+DEFAULT_UNIT = ROOT / "build" / "cup28"
 
 FIRMWARE_MODULE = "CUP28.SHx.ORG"
 FLASH_SIZE = 32 << 20
@@ -64,22 +69,54 @@ def _escape(value: object) -> str:
     return str(value).replace(",", ",,")
 
 
-def qemu_argv(qemu: Path, *, disc: Path, unit: Path, firmware: Path,
-              display: str, audio: Optional[str] = None,
-              track: Optional[Path] = None, qmp: Optional[Path] = None) -> List[str]:
+def prepare_unit(unit: Path) -> None:
+    """The CUP28 machine creates its flash/SRAM files itself; just make the
+    unit directory."""
+    Path(unit).mkdir(mode=0o700, parents=True, exist_ok=True)
+
+
+def prepare(unit, args=None) -> Dict[str, object]:
+    """Prepare a CUP28 unit's media from its map DVD and return what
+    qemu_argv needs."""
+    disc = getattr(args, "disc", None) or os.environ.get("MELCO_DISC") \
+        or os.environ.get("CUP28_DISC")
+    if not disc:
+        raise ImageFormatError("CUP28 requires --disc, MELCO_DISC or CUP28_DISC")
+    disc = Path(disc).resolve(strict=True)
+    if unit is None:
+        unit = os.environ.get("MELCO_UNIT") or os.environ.get("CUP28_UNIT") \
+            or DEFAULT_UNIT
+    unit = Path(unit)
+    if not unit.is_absolute():
+        unit = ROOT / unit
+    qemu = Path(getattr(args, "qemu", None) or DEFAULT_QEMU).resolve()
+    if not qemu.is_file():
+        raise ImageFormatError("QEMU not found at %s. Run 'make qemu' first." % qemu)
+    track = getattr(args, "track", None)
+    track = Path(track).resolve(strict=True) if track else None
+    firmware = prepare_firmware(disc, unit)
+    return {"qemu": qemu, "disc": disc, "unit": unit, "firmware": firmware,
+            "track": track, "audio": getattr(args, "audio", None)}
+
+
+def qemu_argv(media: dict, *, display: str, serial=None, extra=(),
+              qmp=None) -> List[str]:
+    """The QEMU command line for a unit prepared by prepare()."""
     properties = {
-        "dvdimage": disc,
-        "drfimage": unit / "flash.bin",
-        "sramsave": unit / "sram.bin",
+        "dvdimage": media["disc"],
+        "drfimage": media["unit"] / "flash.bin",
+        "sramsave": media["unit"] / "sram.bin",
     }
-    if track is not None:
-        properties["gpstrack"] = track
+    if media.get("track") is not None:
+        properties["gpstrack"] = media["track"]
     options = ["cup28"] + [
         key + "=" + _escape(value) for key, value in properties.items()
     ]
+    audio = media.get("audio")
     if audio:
         options.append("audiodev=nav")
-    argv = [str(qemu), "-M", ",".join(options), "-kernel", str(firmware),
+    argv = [str(media["qemu"]), "-M", ",".join(options),
+            "-kernel", str(media["firmware"]),
             "-display", display, "-monitor", "none", "-no-reboot",
             "-serial", "null", "-serial", "null", "-serial", "stdio",
             "-icount", "shift=auto,sleep=on"]
@@ -89,4 +126,4 @@ def qemu_argv(qemu: Path, *, disc: Path, unit: Path, firmware: Path,
         argv += ["-audiodev", audio + ",id=nav"]
     if qmp is not None:
         argv += ["-qmp", "unix:%s,server=on,wait=off" % _escape(qmp)]
-    return argv
+    return argv + [str(a) for a in extra]
