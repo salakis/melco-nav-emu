@@ -1,75 +1,119 @@
 # melco-nav-emu
 
-A QEMU-based emulator for Mitsubishi Electric navigation units. The same
-`qemu-system-sh4` binary runs each unit's original firmware and map data.
+A QEMU-based emulator for Mitsubishi Electric (MELCO) navigation head units.
+One patched `qemu-system-sh4` binary runs each unit's own firmware and map
+data. No firmware, disc or map data is included — you need your own dumps.
 
-| QEMU machine | Head unit | Tested disc set |
-|---|---|---|
-| `cup2006` | Volvo RTI MMM+ (CU-P2006) | 2017–18 Europe (`EU-3350-00`, Volvo 32214046) |
-| `cup28` | Volvo VNS (CUP28) | North America Western (`NA_0900_06A_WESTERN`) |
+| QEMU machine | Head unit | Tested disc set | Board model notes |
+|---|---|---|---|
+| `cup2006` | Volvo RTI MMM+ (CU-P2006) | 2017–18 Europe (`EU-3350-00`, Volvo 32214046) | — |
+| `cup28` | Volvo VNS | North America Western (`NA_0900_06A_WESTERN`) | [docs/board-cup28.md](docs/board-cup28.md) |
 
-The emulator models board hardware at its registers and interrupts and runs the
-disc's own Windows CE kernel, drivers and navigation application. The models
-are tested on macOS (Apple Silicon). The source labels approximated hardware
-behavior with `STUB:` comments.
+Each machine models its board's hardware at the register and interrupt level
+and runs the disc's own Windows CE kernel, drivers and navigation application.
+Approximated hardware behavior is labelled `STUB:` in the sources and listed
+under each unit's "Limitations and STUBs" below. The models are tested on
+macOS (Apple Silicon); Linux builds the same way but is untested.
 
-One deliberate exception to "hardware only": on a unit's first power-on the
-host-side launcher (`tools/unit.py`) writes the unit's own map-install record
-into its battery RAM, because the served HDD already holds the complete map
-install and there is no real install process to run (marked `STUB` there; see
-"The unit's state" below).
+One deliberate exception to "hardware only": on a CU-P2006's first power-on
+the host-side launcher (`tools/unit.py`) writes the unit's own map-install
+record into its battery RAM, because the served HDD already holds the complete
+map install and there is no real install process to run (marked `STUB` there;
+see "CU-P2006 unit state" below). For the same reason no UI screenshots are
+published: a capture of the running unit would show the proprietary map data
+and firmware interface.
 
-No firmware, disc or map data is included. You need your own dumps. For the
-same reason no UI screenshots are published: a capture of the running unit
-would show the proprietary map data and firmware interface.
+## Requirements and building
 
-## Requirements
-
-- macOS with the Xcode command line tools, and Homebrew `glib`, `pixman`
-  and `pkg-config` (QEMU's build dependencies). Linux builds the same way but
-  is untested.
+- macOS with the Xcode command line tools, and Homebrew `glib`, `pixman` and
+  `pkg-config` (QEMU's build dependencies). Linux builds the same way but is
+  untested.
 - Python 3.9 or later.
-- **CU-P2006** needs about **45 GB free disk**: the disc ISOs (~9.5 GB), and the virtual HDD
-  (~22 GB, built once from the discs; the build needs about as much again
-  for temporary part files until it finishes).
-
-## Run CUP28 (Volvo VNS)
-
-From the repository root, build QEMU and point the launcher at your Western
-map DVD ISO.
+- Disk space: **CU-P2006** needs about **45 GB free** — the disc ISOs (~9.5 GB)
+  plus the virtual HDD (~22 GB, built once from the discs; the build needs
+  about as much again for temporary part files until it finishes). **CUP28**
+  needs only its map DVD ISO (~8 GB).
 
 ```sh
-make qemu
+make qemu    # download the pinned QEMU release, apply qemu/core-patches/, build (minutes)
+make test    # offline unit tests, no images needed
+```
+
+The patched binary is built at `qemu/src/build/qemu-system-sh4`; nothing is
+installed onto your `PATH`. Run `qemu/src/build/qemu-system-sh4 -M cup2006,help`
+or `-M cup28,help` to list a board's machine options.
+
+## CUP28 (Volvo VNS)
+
+### Running
+
+```sh
 CUP28_DISC="/path/to/Disc A - Western.iso" make boot MODEL=cup28
+# or directly:
+.venv/bin/python -m melco_nav_emu.cli boot --model cup28 --disc "/path/to/Disc A - Western.iso"
 ```
 
 Use Enter to accept the disclaimer, Escape to go back, and the arrow keys to
 navigate. The macOS window is resizable and uses CoreAudio. On a new unit the
-firmware can initially look for European files. Let it finish its first power-on,
-close the window, then run the same command again. The guest saves the North
-American market setting supplied over MOST and uses miles and US English
-guidance. The launcher stores flash and battery-backed SRAM in `build/cup28`.
-Set `CUP28_UNIT` to a different directory to start a separate unit.
+firmware can initially look for European files; let it finish its first
+power-on, close the window, then run the same command again. The guest saves
+the North American market setting supplied over MOST and then uses miles and
+US English guidance.
 
-To replay a drive, pass a uniformly sampled sensor CSV. This example uses the
-three-minute I-80 scenario included in the repository.
+### Unit state
+
+The launcher stores the unit's flash and battery-backed SRAM in `build/cup28`
+(`flash.bin`, `sram.bin`) plus the extracted firmware image `nk-<sha256>.nb0`.
+Set `CUP28_UNIT` to a different directory for a separate unit; `rm -rf` that
+directory for a new one.
+
+### Drive replay (GPS and vehicle sensors)
+
+CUP28 has no GNSS radio replay — position arrives over MOST — but it does take
+recorded measurements: feed a uniformly sampled sensor CSV with `--track`.
+The `sensors.csv` of any shipped scenario works directly:
 
 ```sh
 .venv/bin/python -m melco_nav_emu.cli boot --model cup28 \
   --disc "/path/to/Disc A - Western.iso" --track scenarios/na-i80/sensors.csv
 ```
 
-Each row contains `t_s,lat_deg,lon_deg,alt_m,speed_kmh,heading_deg,yaw_dps,gps`.
-Use `gps=0` to simulate loss of fix while wheel pulses and gyro continue. The
-replay ends at rest with an invalid fix. The default is a stationary receiver in
-San Francisco. See [CUP28 hardware and limitations](docs/board-cup28.md).
+Each row is `t_s,lat_deg,lon_deg,alt_m,speed_kmh,heading_deg,yaw_dps,gps` (the
+shipped scenarios sample at 10 Hz). The replay drives the receiver fix, the
+cumulative MOST wheel count and the analog gyro from one virtual clock; set
+`gps=0` in a row to simulate loss of fix while wheel pulses and gyro continue.
+The replay ends at rest with an invalid fix. Without `--track` the receiver is
+stationary with a fixed fix in San Francisco. See "GPS drive scenarios" below
+for where the scenarios come from, and [docs/board-cup28.md](docs/board-cup28.md)
+for the receiver model.
 
-## Install and run CU-P2006 (Volvo RTI MMM+)
+### Limitations and STUBs
 
-```sh
-make qemu        # download the pinned QEMU release, patch it, build (minutes)
-make test        # offline unit tests, no images needed
-```
+- **Receiver is modelled, not simulated.** Default fix: stationary in San
+  Francisco. With `--track`, positions come from the CSV, but the satellite
+  constellation is a fixed pattern and the receiver clock is made up (STUB): it
+  starts at a fixed 2026-11-22 12:00:00 and advances monotonically with virtual
+  time. `drive.replay` (the CU-P2006 radio-chip format) is not used by this
+  unit.
+- **DVD replies** are shaped to pass the guest driver's checks rather than
+  taken from a drive protocol (STUB).
+- **Audio**: playback DMA is chunked through the host audio backend; KIWI voice
+  decoding, speech recognition and text-to-speech are outside the verified
+  path.
+- **Display**: Q2SD implements the commands the tested firmware uses, with
+  fixed frame timing; original panel timing and exact pixel fidelity are
+  unverified.
+- **No snapshots or reset**: the board devices have no saved state, so `savevm`
+  and migration are refused; a reset powers the unit off (start it again).
+- Tested with the North America Western disc set only; other disc editions and
+  the M-loader update process are out of scope. The same disc's `LOADING.KWI`
+  also lists `CUP2001E.*` modules, but the unit boots the `CUP28.SHx.ORG`
+  image — that is the board this machine models (see
+  [docs/board-cup28.md](docs/board-cup28.md)).
+
+## CU-P2006 (Volvo RTI MMM+)
+
+### Installing and running
 
 Put your dumps of the two discs in place:
 
@@ -84,11 +128,11 @@ make extract flatten hdd   # disc root files -> images/dvd{1,2}/,
 make boot                  # first run builds the virtual HDD (~22 GB, once)
 ```
 
-`make boot` opens the unit's screen in a window that can be resized (the
-400x234 panel scales to fit); the unit's serial console prints on the
-terminal. The first boot of a new unit is preceded by one short headless
-power-on (about 30 s, log in `build/unit/first-power-on.log`), in which the
-guest formats its battery RAM.
+`make boot` opens the unit's screen in a window that can be resized (the 400x234
+panel scales to fit); the unit's serial console prints on the terminal. The
+first boot of a new unit is preceded by one short headless power-on (about
+30 s, log in `build/unit/first-power-on.log`), in which the guest formats its
+battery RAM. The disclaimer is accepted with ENTER, as in the car.
 
 Keys:
 
@@ -101,9 +145,7 @@ Keys:
 | F11 | disc eject button / hand at the slot |
 | F12 | ignition off (the unit saves its state and powers down; QEMU exits) |
 
-The disclaimer is accepted with ENTER, as in the car.
-
-## The unit's state
+### Unit state
 
 `build/unit/` holds one head unit's non-volatile memory: its flash, battery
 RAM, battery SRAM and EEPROM. It persists across boots like the car's, so
@@ -117,7 +159,7 @@ in `build/hdd/`, shared by all units.
 - `CUP2006_UNIT=<dir> make boot` uses another unit directory.
 - `python3 tools/unit.py show build/unit` prints what a unit's memory says.
 
-## Disc sets, region and marque
+### Disc sets, region and marque
 
 Another disc set is chosen with environment variables:
 
@@ -146,18 +188,10 @@ set: `06` when the disc 1 file name contains `NA-`, else `04`.
 A North America set (`NA-2450-00`) uses the same disc format and firmware as
 the Europe set. Other and older disc sets have not been tested.
 
-## GPS
+### Drive replay (GPS)
 
-### CU-P2006
-
-Without a recording the GPS receiver has no signal (no fix). Two short
-recorded drives ship in `scenarios/`, each 3 minutes at 110 km/h on the
-straightest 5.5 km of a motorway, picked from OpenStreetMap:
-
-| scenario | road | discs |
-|---|---|---|
-| `eu-a4` | A-4 southbound, La Mancha, Spain | Europe |
-| `na-i80` | I-80 westbound, Bonneville Salt Flats, Utah | North America |
+Without a recording the GPS receiver has no signal (no fix). Pick one of the
+shipped scenarios (see "GPS drive scenarios" below):
 
 ```sh
 CUP2006_SCENARIO=eu-a4 make boot
@@ -166,42 +200,10 @@ CUP2006_SCENARIO=eu-a4 make boot
 On a new unit the first fix comes about 35 s after power-on; the recording
 ends at about 180 s, after which the receiver reports signal loss. Your own
 recordings go in `build/gps/<name>/` (gitignored); `tools/gps/README.md`
-explains how they are made. A scenario directory holds:
+explains how they are made and the file formats (`drive.replay` for the radio
+chip, `sensors.csv` for the car's wheel and gyro sensors on the same clock).
 
-- `drive.replay`: the tracking chip's per-satellite measurements over time.
-  Format: the 8 bytes `GNSSIQ1\0`, a little-endian u32 frame count and a u32
-  frame interval in ms, then one 4096-byte frame per interval holding 32
-  measurement records of 0x50 bytes (one per GPS PRN, first word = PRN,
-  0 = no signal) followed by 32 navigation records of 0x30 bytes (same
-  indexing). The guest's own GPS library computes every fix from these.
-- `sensors.csv`: the car's sensors on the same clock, one row per sample:
-  `t_s,lat_deg,lon_deg,alt_m,speed_kmh,heading_deg,yaw_dps[,gps]`. Speed
-  drives the wheel-pulse frames, yaw the gyro; the position columns are not
-  used (the fix comes from `drive.replay`).
-
-### CUP28
-
-CUP28 has no GNSS radio replay: by default the board model sends a fixed
-stationary fix in San Francisco over MOST, and `boot --model cup28 --track
-scenarios/<name>/sensors.csv` instead drives position, wheel count and gyro
-from the `lat_deg`/`lon_deg` columns (see "Run CUP28" above). `drive.replay`
-is not used by this unit.
-
-## Other options
-
-| variable / option | effect |
-|---|---|
-| `CUP2006_CARMARKER=1` | draw an approximation of the 3D car marker (see below) |
-| `DISPLAY_BACKEND=sdl` / `none` | another QEMU display instead of `cocoa,zoom-to-fit=on` |
-| `python3 tools/profile.py -machine verbose=on` | log device activity (Sub-CPU link, keys, disk, display) on stderr |
-
-The default `make boot` uses `tools/profile.py`. When you invoke the profile
-directly, it passes extra arguments to QEMU. The patched binary is built at
-`qemu/src/build/qemu-system-sh4` (nothing is installed onto your PATH); use
-`qemu/src/build/qemu-system-sh4 -M cup2006,help` or `-M cup28,help` to list
-board-specific machine options.
-
-## CU-P2006 limitations
+### Limitations and STUBs
 
 - **3D map car marker.** Navi draws it with the PowerVR MBX 3D core, which is
   not emulated, so the 3D view has no marker. `CUP2006_CARMARKER=1` draws an
@@ -222,6 +224,55 @@ board-specific machine options.
   process's MMU. STUB, kept because the product driver reads the reply there.
 - Untested: Linux hosts, big-endian hosts, disc sets other than `EU-3350-00`.
 
+## GPS drive scenarios
+
+Two short recorded drives ship in `scenarios/`, each 3 minutes at 110 km/h on
+the straightest 5.5 km of a motorway, picked from OpenStreetMap:
+
+| scenario | road | discs |
+|---|---|---|
+| `eu-a4` | A-4 southbound, La Mancha, Spain | Europe |
+| `na-i80` | I-80 westbound, Bonneville Salt Flats, Utah | North America |
+
+A scenario directory holds:
+
+- `drive.replay`: what the unit's GPS tracking chip measures, satellite by
+  satellite — used by **CU-P2006** (`CUP2006_SCENARIO=<name>`, via the
+  `gnssreplay=` machine option). Format: the 8 bytes `GNSSIQ1\0`, a
+  little-endian u32 frame count and a u32 frame interval in ms, then one
+  4096-byte frame per interval holding 32 measurement records of 0x50 bytes
+  (one per GPS PRN, first word = PRN, 0 = no signal) followed by 32 navigation
+  records of 0x30 bytes (same indexing). The guest's own GPS library computes
+  every fix from these.
+- `sensors.csv`: the car's sensors on the same clock, one row per sample:
+  `t_s,lat_deg,lon_deg,alt_m,speed_kmh,heading_deg,yaw_dps,gps`. **CUP28**
+  consumes this file directly (`--track scenarios/<name>/sensors.csv`): speed
+  drives the MOST wheel count, yaw the gyro, and lat/lon the position over
+  MOST. **CU-P2006** consumes the wheel and yaw columns (`gpstrack=`); its
+  position columns are not used, because the fix comes from `drive.replay`.
+- `motion.csv`, `track.gpx`, `route.json`: intermediate products of the
+  scenario build (`tools/gps/README.md`).
+
+## Options reference
+
+| option | unit | effect |
+|---|---|---|
+| `CUP28_DISC` / `--disc` | CUP28 | map DVD ISO |
+| `CUP28_UNIT` / `--unit` | CUP28 | unit state directory (default `build/cup28`) |
+| `--track` | CUP28 | drive-replay sensor CSV (`gpstrack=`) |
+| `--display`, `--audio`, `--qmp` | CUP28 | QEMU display backend, audio backend (`none` to disable), QMP socket |
+| `CUP2006_DISC1` / `CUP2006_DISC2` | CU-P2006 | disc ISO paths |
+| `CUP2006_UNIT` | CU-P2006 | unit state directory (default `build/unit`) |
+| `CUP2006_SCENARIO` | CU-P2006 | replay a shipped GPS scenario |
+| `CUP2006_CARMARKET=<hex>` | CU-P2006 | market byte from the car (region/marque table above) |
+| `CUP2006_CARMARKER=1` | CU-P2006 | draw an approximation of the 3D car marker (see limitations) |
+| `DISPLAY_BACKEND=sdl` / `none` | both | QEMU display backend instead of the per-unit default (`cocoa,zoom-to-fit=on` on macOS, `sdl` elsewhere) |
+| `-machine verbose=on` | both | log device activity on stderr |
+
+The default `make boot` uses `tools/profile.py` for CU-P2006 and
+`src/melco_nav_emu/cli.py` for CUP28; when you invoke the profile directly it
+passes extra arguments to QEMU.
+
 ## Layout
 
 ```
@@ -229,13 +280,14 @@ machine/            board models (cup2006.c and cup28.c) and device sources,
                     symlinked into QEMU's hw/sh4/
 qemu/upstream.json  the pinned QEMU release
 qemu/core-patches/  machine registration and small SH-4 changes
+docs/               board model notes (docs/board-cup28.md)
 scenarios/          two 3-minute GPS drives (OpenStreetMap-based, ODbL 1.0:
                     see scenarios/LICENSE)
 scripts/            build QEMU, extract the discs, carve the firmware,
                     build and verify the HDD
 tools/gps/          make GPS scenarios from OpenStreetMap
 tools/profile.py    CU-P2006 boot and media preparation
-tools/unit.py       a unit's persistent state
+tools/unit.py       a CU-P2006 unit's persistent state
 src/melco_nav_emu/  Python package (image parsers, QMP client, CLI)
 tests/              offline unit tests
 ```

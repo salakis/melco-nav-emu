@@ -7,6 +7,12 @@ at physical `0x00080000`. The CPU starts at `0x80080004`. This boots the
 stock SHx image directly. The original reset ROM and M-loader update process
 are outside the supported launch path.
 
+The same disc's `LOADING.KWI` also lists a `CUP2001E.MLD.ORG` /
+`CUP2001E.SHx.ORG` pair (the SHx image links at `0x80060000`, the M-loader at
+`0x8c040000`, as `CUP28.MLD.ORG` does). The unit boots the `CUP28.SHx.ORG`
+image — that is the board modelled here, hence the machine name `cup28`; the
+role of the `CUP2001E` modules is not modelled.
+
 | Device | Address or interface | Scope |
 |---|---|---|
 | DVD data ports | `0x07410000` | Read-only sector transfers from the supplied ISO |

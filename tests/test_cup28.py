@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Copyright (c) 2026 melco-nav-emu contributors
 from pathlib import Path
+import re
 import struct
 
 import pytest
@@ -114,3 +115,19 @@ def test_default_boot_uses_existing_cup2006_profile(tmp_path, monkeypatch):
     assert argv[-1] == str(cli.PROJECT_ROOT / "tools" / "profile.py")
     assert env["CUP2006_UNIT"] == str(unit)
     assert env["DISPLAY_BACKEND"] == "none"
+
+
+def test_shipped_scenarios_match_the_cup28_track_format():
+    # The README tells CUP28 users to pass scenarios/<name>/sensors.csv to
+    # --track, so the shipped CSVs must keep the header cup28-track.c.inc
+    # parses.
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "machine" / "cup28-track.c.inc").read_text()
+    match = re.search(r'static const char header\[\] =\s*"([^"]+)"', source)
+    assert match, "cup28 track header not found in machine/cup28-track.c.inc"
+    header = match.group(1)
+    scenarios = sorted((root / "scenarios").glob("*/sensors.csv"))
+    assert scenarios, "no shipped GPS scenarios"
+    for csv in scenarios:
+        first = csv.read_text().splitlines()[0].strip()
+        assert first == header, f"{csv.relative_to(root)}: header {first!r} != {header!r}"
