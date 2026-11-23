@@ -2100,6 +2100,10 @@ static void cup2006_init(MachineState *machine)
     /* SCIF0 byte-time timer that sets SCFSR.TDFE/TEND after a TX byte. */
     s->scif0_tx_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
                                      cup2006_scif0_tx_tick, s);
+    /* SCFSR resets to H'0060 (TEND=1, TDFE=1), sh7751 manual: the transmit
+     * side is ready before the first SCFTDR write. */
+    s->scif0_file[CUP2006_SCIF0_SCFSR] =
+        CUP2006_SCIF0_SCFSR_TEND | CUP2006_SCIF0_SCFSR_TDFE;
     memory_region_init_io(&s->scif_regs, NULL, &cup2006_scif_ops,
                           s, "cup2006-scif", CUP2006_SCIF_SIZE);
     memory_region_add_subregion_overlap(sysmem, CUP2006_SCIF_BASE,
