@@ -1,0 +1,563 @@
+/*
+ * Volvo VNS CUP28 board.
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright (c) 2026 melco-nav-emu contributors
+ */
+
+#include "qemu/osdep.h"
+#include "qemu/units.h"
+#include <math.h>
+#ifdef CONFIG_POSIX
+#include <sys/file.h>
+#endif
+#include "qemu/audio.h"
+#include "qemu/bswap.h"
+#include "qemu/error-report.h"
+#include "qemu/log.h"
+#include "qemu/notify.h"
+#include "qemu/timer.h"
+#include "qapi/error.h"
+#include "hw/char/serial-mm.h"
+#include "hw/core/boards.h"
+#include "hw/core/cpu.h"
+#include "hw/sh4/sh.h"
+#include "migration/blocker.h"
+#include "system/address-spaces.h"
+#include "system/memory.h"
+#include "system/physmem.h"
+#include "system/reset.h"
+#include "system/runstate.h"
+#include "system/system.h"
+#include "target/sh4/cpu.h"
+#include "ui/console.h"
+#include "ui/input.h"
+#include "ui/surface.h"
+
+#define TYPE_CUP28_MACHINE MACHINE_TYPE_NAME("cup28")
+OBJECT_DECLARE_SIMPLE_TYPE(Cup28MachineState, CUP28_MACHINE)
+
+#define CUP28_FLASH_BASE 0
+#define CUP28_FLASH_SIZE (32 * MiB)
+#define CUP28_FLASH_LOG_MAX 256
+#define CUP28_FLASH_SECTOR (256 * KiB)
+#define CUP28_FIRMWARE_OFFSET 0x80000
+
+typedef struct Cup28TrackSample {
+    double latitude, longitude, altitude;
+    double speed_kmh, heading_deg, yaw_dps;
+    bool fix_valid;
+} Cup28TrackSample;
+
+struct Cup28MachineState {
+    MachineState parent_obj;
+
+    bool powered;
+    bool verbose;
+    char *dvdimage, *drfimage, *sramsave, *gpstrack;
+    Error *migration_blocker;
+    MemoryRegion ram, drf_regs, drf_alias_regs;
+    MemoryRegion selftest_regs, rtc_regs, rtc_a7_regs;
+    QemuConsole *disp_con;
+
+    int dvd_fd, drf_fd;
+    uint64_t dvd_size;
+    uint8_t dvd5_rx[32];
+    unsigned dvd5_rx_len, dvd5_rx_pos;
+    bool dvd5_spinup_pending, dvd5_disc_ready;
+    struct intc_source *dvd5_intc_src, *dvd5_intc_src2;
+
+    uint8_t *drf_data;
+    hwaddr drf_dirty_lo, drf_dirty_hi;
+    bool drf_image_full_write, drf_autoselect, drf_program_pending;
+    unsigned drf_cmd_state;      /* AMD unlock-sequence state */
+    hwaddr drf_autoselect_bank;
+    uint32_t drf_program_addr;
+    uint8_t drf_id_save[16];
+    uint32_t drf_erases, drf_programs, drf_other_writes;
+    QEMUTimer *drf_save_timer;
+    Notifier drf_exit;
+
+    int64_t rtc_base_s, rtc_base_ms;
+    uint16_t rtc_set[6];
+
+    GArray *track;
+    unsigned gps_track_n;
+    int64_t track_interval_ms, track_start_ms, wheel_track_last_ms;
+    Cup28TrackSample track_stopped;
+    MemoryRegion p28_uart_container;
+    MemoryRegion p28_q2_regs;
+    uint8_t p28_q2_reg[0x800];
+    MemoryRegion p28_q2_vram;
+    uint8_t *p28_q2_mem;
+    QEMUTimer *p28_q2_timer;
+    bool p28_q2_list_done;
+    uint8_t p28_q2_work[1024 * 1024 / 8]; /* Q2 binary work plane */
+    struct intc_source *p28_q2_intc_src;
+    MemoryRegion p28_dvd_ports, p28_dvd_control;
+    MemoryRegion p28_audio_regs;
+    uint32_t p28_audio_reg[2][5];
+    QEMUTimer *p28_audio_timer;
+    Notifier audio_shutdown;
+    AudioBackend *p28_audio_backend;
+    SWVoiceOut *p28_audio_out;
+    bool p28_audio_second_buffer;
+    bool p28_audio_kiwi;
+    bool p28_audio_streaming;
+    int32_t p28_audio_history[2];
+    uint32_t p28_audio_dma_address;
+    size_t p28_audio_dma_bytes, p28_audio_dma_remaining;
+    uint8_t p28_audio_pcm[MiB];
+    size_t p28_audio_pcm_pos, p28_audio_pcm_len;
+    uint64_t p28_audio_frames;
+    MemoryRegion p28_dmac_io, p28_dmac_a7;
+    uint8_t p28_dmac_reg[0x100];
+    struct intc_source *p28_dmac_src;
+    MemoryRegion p28_most_io;
+    struct intc_source *p28_most_src;
+    struct intc_source *p28_most_chip_src, *p28_most_async_src;
+    QemuInputHandlerState *most_input;
+    uint32_t p28_most_control;
+    uint16_t p28_most_rx;
+    uint16_t p28_most_next_rx;
+    bool p28_most_shift_pending, p28_most_rx_ready;
+    QEMUTimer *p28_most_timer;
+    uint8_t p28_most_registers[4][256];
+    uint8_t p28_most_page, p28_most_map, p28_most_phase;
+    bool p28_most_reading;
+    unsigned p28_most_vc_sent;
+    uint8_t p28_most_q[16][17];
+    uint8_t p28_most_q_len[16];
+    unsigned p28_most_q_head, p28_most_q_count;
+    /* Peer-side hold-back queue: while the node FIFO is full, the emulated
+     * vehicle peer keeps its own messages here and delivers them as the
+     * guest drains, instead of dropping them. */
+    uint8_t p28_most_peer_q[64][17];
+    uint8_t p28_most_peer_q_len[64];
+    unsigned p28_most_peer_q_head, p28_most_peer_q_count;
+    bool p28_most_gps_on, p28_most_navsys_listed;
+    unsigned p28_most_gps_log;
+    uint8_t p28_most_gps_last_position[8];
+    bool p28_most_gps_valid;
+    bool p28_most_wheel_on, p28_most_vc_complete;
+    uint8_t p28_most_wheel_counter;
+    QEMUTimer *p28_most_gps_timer;
+    /* CUP28 GPS receiver UART (cup28-gps.c.inc) */
+    MemoryRegion p28_gps_io;
+    struct intc_source *p28_gps_tx_src;
+    uint8_t p28_gps_ier, p28_gps_lcr, p28_gps_mcr, p28_gps_scr;
+    uint8_t p28_gps_dll, p28_gps_dlm;
+    /* CUP28 dead-reckoning sampler (cup28-gps.c.inc) */
+    struct intc_source *p28_sns_src;
+    QEMUTimer *p28_sns_timer;
+    MemoryRegion p28_pulse_io;
+    double p28_sns_pulse_fraction;
+    bool p28_most_power_on;
+    uint8_t p28_dvd_control_reg[0x200];
+    uint8_t p28_dvd_tx[24];
+    unsigned p28_dvd_tx_len;
+    uint8_t *p28_dvd_stream;
+    unsigned p28_dvd_stream_len;
+    bool p28_dvd_rx_ready;
+    bool p28_dvd_tx_wait;
+    int64_t p28_dvd_rx_due;
+    QEMUTimer *p28_dvd_timer;
+    MemoryRegion p28_eeprom_regs, p28_eeprom_bank;
+    uint32_t p28_eeprom_reg[0x40];
+    uint8_t *p28_eeprom_mem;
+    /* earlier-board backup SRAM / parallel EEPROM windows. */
+    MemoryRegion p28_bksram, p28_bkeeprom;
+    /* flr.dll's 256 KiB FLR window at physical 0x01a00000. */
+    MemoryRegion p28_flrwin;
+    uint8_t *p28_flr_mem;
+};
+
+static uint64_t cup28_register_read(const uint8_t *regs, hwaddr addr,
+                                    unsigned size)
+{
+    uint64_t value = 0;
+
+    for (unsigned i = 0; i < size; i++) {
+        value |= (uint64_t)regs[addr + i] << (8 * i);
+    }
+    return value;
+}
+
+static void cup28_register_write(uint8_t *regs, hwaddr addr, uint64_t value,
+                                  unsigned size)
+{
+    for (unsigned i = 0; i < size; i++) {
+        regs[addr + i] = value >> (8 * i);
+    }
+}
+
+/* Device logging, off by default (verbose=on).  Guest-visible behaviour does
+ * not depend on it; every call site has the state pointer s in scope. */
+#define cup28_dbg(s, ...) do {                  \
+        if ((s)->verbose) {                     \
+            info_report(__VA_ARGS__);           \
+        }                                       \
+    } while (0)
+
+#include "cup28-track.c.inc" 
+#include "cup28-rtc.c.inc"
+#include "cup28-flash.c.inc"
+#include "cup28-dmac.c.inc"
+#include "cup28-q2.c.inc"
+#include "cup28-most.c.inc"
+#include "cup28-gps.c.inc"
+#include "cup28-dvd.c.inc"
+#include "cup28-audio.c.inc"
+
+static void cup28_reset_cpu(void *opaque)
+{
+    SuperHCPU *cpu = opaque;
+
+    cpu_reset(CPU(cpu));
+    cpu->env.pc = 0x80080004;
+}
+
+/* The board devices (MOST peer, DVD, audio, flash autoselect) have no saved
+ * state and keep theirs across a CPU-only reset, so a rebooted guest would
+ * never see the MOST peer's handshake again.  On the real unit a reset is a
+ * power cycle: model that as switching the unit off, as cup2006 does. */
+static void cup28_machine_reset(MachineState *machine, ResetType type)
+{
+    Cup28MachineState *s = CUP28_MACHINE(machine);
+
+    if (s->powered) {
+        warn_report("cup28: reset is a power cycle of the whole unit;"
+                    " powering off (start QEMU again)");
+        qemu_system_shutdown_request(SHUTDOWN_CAUSE_GUEST_RESET);
+        return;
+    }
+    s->powered = true;
+    qemu_devices_reset(type);
+}
+
+/* STUB: the board self-test reports a fixed ADC sample and ready status. */
+static uint64_t cup28_selftest_read(void *opaque, hwaddr addr, unsigned size)
+{
+    switch (addr) {
+    case 0x04:
+        return 0x0200;
+    case 0x10:
+        return 0xa800;
+    default:
+        return 0;
+    }
+}
+
+static void cup28_selftest_write(void *opaque, hwaddr addr, uint64_t value,
+                                  unsigned size)
+{
+}
+
+static const MemoryRegionOps cup28_selftest_ops = {
+    .read = cup28_selftest_read,
+    .write = cup28_selftest_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+};
+
+static bool cup28_draw(void *opaque)
+{
+    Cup28MachineState *s = opaque;
+    DisplaySurface *surface = qemu_console_surface(s->disp_con);
+
+    if (surface) {
+        qemu_console_update(s->disp_con, 0, 0, surface_width(surface),
+                            surface_height(surface));
+    }
+    return true;
+}
+
+static const GraphicHwOps cup28_console_ops = { .gfx_update = cup28_draw };
+
+static void cup28_flash_init(Cup28MachineState *s, MemoryRegion *mem,
+                             const char *kernel)
+{
+    g_autofree char *data = NULL;
+    g_autoptr(GError) error = NULL;
+    gsize length;
+
+    memory_region_init_rom_device(&s->drf_regs, NULL, &cup28_flash_ops,
+                                  s, "cup28-flash", CUP28_FLASH_SIZE,
+                                  &error_fatal);
+    s->drf_data = memory_region_get_ram_ptr(&s->drf_regs);
+    memset(s->drf_data, 0xff, CUP28_FLASH_SIZE);
+    s->drf_fd = -1;
+    s->drf_dirty_lo = CUP28_FLASH_SIZE;   /* nothing dirty */
+    s->drf_dirty_hi = 0;
+    if (s->drfimage && *s->drfimage) {
+        struct stat st;
+
+        s->drf_fd = open(s->drfimage, O_RDWR | O_CREAT | O_BINARY, 0600);
+        if (s->drf_fd < 0 || fstat(s->drf_fd, &st) < 0) {
+            error_report("cup28: cannot open flash '%s': %s", s->drfimage,
+                         strerror(errno));
+            exit(1);
+        }
+#ifdef CONFIG_POSIX
+        if (flock(s->drf_fd, LOCK_EX | LOCK_NB) < 0) {
+            error_report("cup28: cannot lock flash '%s': %s", s->drfimage,
+                         strerror(errno));
+            exit(1);
+        }
+#endif
+        if (st.st_size != 0 && st.st_size != CUP28_FLASH_SIZE) {
+            error_report("cup28: flash '%s' must be 32 MiB", s->drfimage);
+            exit(1);
+        }
+        if (st.st_size &&
+            pread(s->drf_fd, s->drf_data, st.st_size, 0) != st.st_size) {
+            error_report("cup28: cannot read flash '%s'", s->drfimage);
+            exit(1);
+        }
+        s->drf_image_full_write = !st.st_size;
+        s->drf_exit.notify = cup28_flash_exit;
+        qemu_add_exit_notifier(&s->drf_exit);
+        s->drf_save_timer = timer_new_ms(QEMU_CLOCK_REALTIME,
+                                        cup28_flash_save_timer, s);
+        timer_mod(s->drf_save_timer, qemu_clock_get_ms(QEMU_CLOCK_REALTIME) +
+                  CUP28_FLASH_SAVE_MS);
+    }
+
+    if (kernel && *kernel) {
+        if (!g_file_get_contents(kernel, &data, &length, &error)) {
+            error_report("cup28: cannot load firmware: %s", error->message);
+            exit(1);
+        }
+        if (!length || length > CUP28_FLASH_SIZE - CUP28_FIRMWARE_OFFSET) {
+            error_report("cup28: firmware does not fit in flash");
+            exit(1);
+        }
+        memcpy(s->drf_data + CUP28_FIRMWARE_OFFSET, data, length);
+    } else if (s->drf_fd < 0 || s->drf_image_full_write) {
+        error_report("cup28: supply a bootable flash image or -kernel");
+        exit(1);
+    }
+
+    memory_region_add_subregion_overlap(mem, CUP28_FLASH_BASE, &s->drf_regs, 1);
+    /* Flash A25 is unwired. The loader uses the upper alias to program it. */
+    memory_region_init_io(&s->drf_alias_regs, OBJECT(s), &cup28_drf_alias_ops,
+                          s, "cup28-flash-alias", CUP28_FLASH_SIZE);
+    memory_region_add_subregion_overlap(mem, CUP28_FLASH_SIZE,
+                                        &s->drf_alias_regs, 1);
+}
+
+static void cup28_storage_init(Cup28MachineState *s, MemoryRegion *mem,
+                               SuperHCPU *cpu)
+{
+    struct intc_desc *intc = cpu->env.intc_handle;
+
+    s->dvd_fd = -1;
+    if (s->dvdimage && *s->dvdimage) {
+        struct stat st;
+
+        s->dvd_fd = open(s->dvdimage, O_RDONLY | O_BINARY);
+        if (s->dvd_fd < 0 || fstat(s->dvd_fd, &st) < 0) {
+            error_report("cup28: cannot open DVD '%s': %s", s->dvdimage,
+                         strerror(errno));
+            exit(1);
+        }
+        s->dvd_size = st.st_size;
+    }
+
+    for (unsigned i = 0; i < intc->nr_sources; i++) {
+        struct intc_source *src = &intc->sources[i];
+
+        /* The loader and NK program different DVD CPLD priorities. */
+        if (src->vect == 0xb80) {
+            src->vect = 0x280;
+            src->prio = 3;
+            src->parent = intc;
+            s->dvd5_intc_src = src;
+        } else if (src->vect == 0x260) {
+            src->prio = 3;
+            s->dvd5_intc_src2 = src;
+        }
+    }
+    s->p28_dvd_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, cup28_dvd_tick, s);
+    memory_region_init_io(&s->p28_dvd_ports, OBJECT(s), &cup28_dvd_port_ops, s,
+                          "cup28-dvd-ports", 0x10);
+    memory_region_add_subregion_overlap(mem, 0x07410000, &s->p28_dvd_ports, 2);
+    memory_region_init_io(&s->p28_dvd_control, OBJECT(s), &cup28_dvd_ctrl_ops,
+                          s, "cup28-cpld", 0x200);
+    memory_region_add_subregion_overlap(mem, 0x07200000, &s->p28_dvd_control, 2);
+
+    /* STUB: EEPROM program/read-back uses erased RAM behind the registers. */
+    memory_region_init_ram(&s->p28_eeprom_bank, NULL, "cup28-eeprom-bank",
+                           CUP28_EEPROM_SIZE, &error_fatal);
+    s->p28_eeprom_mem = memory_region_get_ram_ptr(&s->p28_eeprom_bank);
+    memset(s->p28_eeprom_mem, 0xff, CUP28_EEPROM_SIZE);
+    memory_region_add_subregion_overlap(mem, CUP28_EEPROM_BASE,
+                                        &s->p28_eeprom_bank, 2);
+
+    memset(s->p28_eeprom_reg, 0xff, sizeof(s->p28_eeprom_reg));
+    memory_region_init_io(&s->p28_eeprom_regs, OBJECT(s), &cup28_eeprom_ops,
+                          s, "cup28-eeprom-registers", 0x100);
+    memory_region_add_subregion_overlap(mem, CUP28_EEPROM_BASE,
+                                        &s->p28_eeprom_regs, 3);
+    cup28_bksram_init(s);
+    memory_region_add_subregion_overlap(mem, 0x12000000, &s->p28_bksram, 1);
+    memory_region_init_ram(&s->p28_bkeeprom, NULL, "cup28-backup-eeprom",
+                           MiB, &error_fatal);
+    memset(memory_region_get_ram_ptr(&s->p28_bkeeprom), 0xff, MiB);
+    memory_region_add_subregion_overlap(mem, 0x18000000, &s->p28_bkeeprom, 1);
+
+    /* STUB: the FLR driver sees a blank 256 KiB read/write window. */
+    s->p28_flr_mem = g_malloc0(256 * KiB);
+    memory_region_init_io(&s->p28_flrwin, OBJECT(s), &cup28_flr_ops, s,
+                          "cup28-flr-window", 256 * KiB);
+    memory_region_add_subregion_overlap(mem, 0x01a00000, &s->p28_flrwin, 3);
+}
+
+static void cup28_display_init(Cup28MachineState *s, MemoryRegion *mem,
+                               SuperHCPU *cpu)
+{
+    s->disp_con = qemu_graphic_console_create(NULL, 0, &cup28_console_ops, s);
+    qemu_console_set_surface(s->disp_con, qemu_create_displaysurface(424, 242));
+    cup28_q2_irq_init(s, cpu);
+    memory_region_init_ram(&s->p28_q2_vram, NULL, "cup28-q2-ugm",
+                           8 * MiB, &error_fatal);
+    memory_region_add_subregion_overlap(mem, 0x10000000, &s->p28_q2_vram, 2);
+    s->p28_q2_mem = memory_region_get_ram_ptr(&s->p28_q2_vram);
+
+    stw_le_p(s->p28_q2_reg, 0xc000);     /* SYSR: SRES | DRES */
+    stw_le_p(s->p28_q2_reg + 2, 0x44);   /* SR: FEMP | Q2SD */
+    memory_region_init_io(&s->p28_q2_regs, OBJECT(s), &cup28_q2_ops, s,
+                          "cup28-q2-registers", sizeof(s->p28_q2_reg));
+    memory_region_add_subregion_overlap(mem, 0x11000000, &s->p28_q2_regs, 2);
+    s->p28_q2_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, cup28_q2_tick, s);
+    timer_mod(s->p28_q2_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 16666667);
+}
+
+static void cup28_init(MachineState *machine)
+{
+    Cup28MachineState *s = CUP28_MACHINE(machine);
+    MemoryRegion *mem = get_system_memory();
+    SuperHCPU *cpu = SUPERH_CPU(cpu_create(machine->cpu_type));
+
+    error_setg(&s->migration_blocker, "CUP28 devices cannot be snapshotted or migrated");
+    migrate_add_blocker(&s->migration_blocker, &error_fatal);
+
+    cpu->env.features |= SH_FEATURE_SH4A;
+    qemu_register_reset(cup28_reset_cpu, cpu);
+    memory_region_init_ram(&s->ram, NULL, "cup28.ram", machine->ram_size,
+                           &error_fatal);
+    memory_region_add_subregion(mem, 0, &s->ram);
+    sh7750_init(cpu, mem);
+
+    cup28_flash_init(s, mem, machine->kernel_filename);
+    cup28_storage_init(s, mem, cpu);
+    cup28_display_init(s, mem, cpu);
+    if (s->gpstrack && *s->gpstrack) {
+        cup28_track_load(s);
+    }
+    cup28_dmac_init(s, mem, cpu);
+    cup28_audio_init(s, mem, machine->audiodev);
+    cup28_most_init(s, mem, cpu);
+    cup28_gps_init(s, mem, cpu);
+    cup28_sns_init(s, mem, cpu);
+
+    memory_region_init(&s->p28_uart_container, OBJECT(s), "cup28-uart", 0x20);
+    memory_region_add_subregion_overlap(mem, 0x04800000,
+                                        &s->p28_uart_container, 2);
+    serial_mm_init(&s->p28_uart_container, 0, 2, NULL, 115200,
+                   serial_hd(2), DEVICE_LITTLE_ENDIAN);
+    memory_region_init_io(&s->selftest_regs, OBJECT(s), &cup28_selftest_ops,
+                          s, "cup28-selftest", 0x1000);
+    memory_region_add_subregion_overlap(mem, 0xff93c000, &s->selftest_regs, 1);
+
+    s->rtc_base_s = CUP28_RTC_EPOCH;
+    memory_region_init_io(&s->rtc_regs, OBJECT(s), &cup28_rtc_ops,
+                          s, "cup28-rtc", CUP28_RTC_SIZE);
+    memory_region_add_subregion_overlap(mem, CUP28_RTC_BASE, &s->rtc_regs, 1);
+    memory_region_init_alias(&s->rtc_a7_regs, OBJECT(s), "cup28-rtc-a7",
+                             &s->rtc_regs, 0, CUP28_RTC_SIZE);
+    memory_region_add_subregion_overlap(mem, CUP28_RTC_A7_BASE,
+                                        &s->rtc_a7_regs, 1);
+}
+
+#define CUP28_PATH_PROPERTY(name)                                       \
+    static char *cup28_get_##name(Object *obj, Error **errp)             \
+    {                                                                   \
+        return g_strdup(CUP28_MACHINE(obj)->name);                       \
+    }                                                                   \
+    static void cup28_set_##name(Object *obj, const char *value,        \
+                                 Error **errp)                          \
+    {                                                                   \
+        Cup28MachineState *s = CUP28_MACHINE(obj);                       \
+        g_free(s->name);                                                \
+        s->name = g_strdup(value);                                      \
+    }
+
+CUP28_PATH_PROPERTY(dvdimage)
+CUP28_PATH_PROPERTY(drfimage)
+CUP28_PATH_PROPERTY(sramsave)
+CUP28_PATH_PROPERTY(gpstrack)
+
+static void cup28_finalize(Object *obj)
+{
+    Cup28MachineState *s = CUP28_MACHINE(obj);
+
+    g_free(s->dvdimage);
+    g_free(s->drfimage);
+    g_free(s->sramsave);
+    g_free(s->gpstrack);
+    if (s->most_input) {
+        qemu_input_handler_unregister(s->most_input);
+    }
+    g_clear_pointer(&s->track, g_array_unref);
+}
+
+static bool cup28_get_verbose(Object *obj, Error **errp)
+{
+    return CUP28_MACHINE(obj)->verbose;
+}
+
+static void cup28_set_verbose(Object *obj, bool value, Error **errp)
+{
+    CUP28_MACHINE(obj)->verbose = value;
+}
+
+static void cup28_class_init(ObjectClass *oc, const void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    mc->desc = "Volvo VNS CUP28";
+    mc->init = cup28_init;
+    mc->reset = cup28_machine_reset;
+    mc->default_cpu_type = TYPE_SH7751R_CPU;
+    mc->default_ram_size = 256 * MiB;
+    mc->max_cpus = 1;
+    machine_add_audiodev_property(mc);
+
+    object_class_property_add_str(oc, "dvdimage", cup28_get_dvdimage,
+                                  cup28_set_dvdimage);
+    object_class_property_set_description(oc, "dvdimage", "Read-only DVD ISO");
+    object_class_property_add_str(oc, "drfimage", cup28_get_drfimage,
+                                  cup28_set_drfimage);
+    object_class_property_set_description(oc, "drfimage", "32 MiB flash file");
+    object_class_property_add_str(oc, "sramsave", cup28_get_sramsave,
+                                  cup28_set_sramsave);
+    object_class_property_set_description(oc, "sramsave", "1 MiB backup SRAM file");
+    object_class_property_add_str(oc, "gpstrack", cup28_get_gpstrack,
+                                  cup28_set_gpstrack);
+    object_class_property_set_description(oc, "gpstrack", "GPS and sensor track CSV");
+    object_class_property_add_bool(oc, "verbose",
+                                   cup28_get_verbose, cup28_set_verbose);
+    object_class_property_set_description(oc, "verbose",
+        "log device activity (MOST GPS, DVD, audio DMA, flash) on stderr");
+}
+
+static const TypeInfo cup28_types[] = {
+    {
+        .name = TYPE_CUP28_MACHINE,
+        .parent = TYPE_MACHINE,
+        .instance_size = sizeof(Cup28MachineState),
+        .instance_finalize = cup28_finalize,
+        .class_init = cup28_class_init,
+    },
+};
+
+DEFINE_TYPES(cup28_types)
