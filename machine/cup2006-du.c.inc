@@ -523,8 +523,10 @@ static void cup2006_du_write_at(Cup2006MachineState *s, hwaddr addr,
     uint32_t old, neu;
 
     if (off == CUP2006_DU_DSRCR) {
-        /* Write-1-to-clear DSSR flags (manual 19.3.4). */
-        s->du_status &= ~((uint32_t)value &
+        /* Write-1-to-clear DSSR flags (manual 19.3.4).  Use the lane-shifted
+         * value, so a sub-word write at a non-zero byte offset clears the
+         * intended DSSR bits. */
+        s->du_status &= ~(val &
                           (CUP2006_DU_DSSR_TVR | CUP2006_DU_DSSR_FRM |
                            CUP2006_DU_DSSR_VBK | CUP2006_DU_DSSR_RINT |
                            CUP2006_DU_DSSR_HBK));
