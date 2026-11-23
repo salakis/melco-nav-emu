@@ -85,11 +85,16 @@ static void cup2006_scif_rx_push(Cup2006MachineState *s, uint8_t byte)
 /* The onboard EEPROM is a Microwire 93C46, 64 x 16-bit words, on this SCIF
  * in clocked mode (SCSMR 0x80), bytes bit-reversed on the wire.
  * STUB: programming is instant, so DO reads ready at once. */
+/* Save the EEPROM image to <path>.tmp and rename it over <path> only when
+ * complete, so an interrupted save never leaves an empty or short file
+ * (which would load back as erased and lose the old contents). */
 static void cup2006_eeprom_save(Cup2006MachineState *s)
 {
     uint8_t img[2 * CUP2006_EEPROM_WORDS];
+    g_autofree char *tmp = NULL;
     FILE *f;
     unsigned i;
+    bool ok;
 
     if (!s->eeprom_path || !s->eeprom_path[0]) {
         return;
@@ -98,12 +103,20 @@ static void cup2006_eeprom_save(Cup2006MachineState *s)
         img[2 * i] = s->eeprom[i] >> 8;
         img[2 * i + 1] = s->eeprom[i] & 0xff;
     }
-    f = fopen(s->eeprom_path, "wb");
-    if (!f || fwrite(img, sizeof(img), 1, f) != 1) {
-        warn_report("cup2006: eeprom: cannot write '%s'", s->eeprom_path);
+    tmp = g_strdup_printf("%s.tmp", s->eeprom_path);
+    f = fopen(tmp, "wb");
+    if (!f) {
+        warn_report("cup2006: eeprom: cannot write '%s': %s", tmp,
+                    strerror(errno));
+        return;
     }
-    if (f) {
-        fclose(f);
+    ok = fwrite(img, sizeof(img), 1, f) == 1;
+    ok = (fflush(f) == 0) && ok;
+    ok = (fclose(f) == 0) && ok;
+    if (!ok || rename(tmp, s->eeprom_path) != 0) {
+        warn_report("cup2006: eeprom: saving '%s' failed: %s", s->eeprom_path,
+                    strerror(errno));
+        unlink(tmp);
     }
 }
 
@@ -113,18 +126,22 @@ static void cup2006_eeprom_load(Cup2006MachineState *s)
     FILE *f;
     unsigned i;
 
+    /* An erased Microwire 93C46 reads 0xFFFF on every word, so a fresh or
+     * unreadable unit starts erased, never all-zero. */
+    memset(s->eeprom, 0xff, sizeof(s->eeprom));
     if (!s->eeprom_path || !s->eeprom_path[0]) {
         return;
     }
     f = fopen(s->eeprom_path, "rb");
     if (!f) {
-        return;                     /* a fresh unit: all zero until written */
+        return;                     /* a fresh unit: erased (0xFFFF) */
     }
     if (fread(img, sizeof(img), 1, f) == 1) {
         for (i = 0; i < CUP2006_EEPROM_WORDS; i++) {
             s->eeprom[i] = img[2 * i] << 8 | img[2 * i + 1];
         }
     }
+    /* A short file leaves the rest of the array erased. */
     fclose(f);
 }
 
