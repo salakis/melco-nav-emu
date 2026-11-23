@@ -234,7 +234,7 @@ static void cup2006_ata_build_identify(Cup2006MachineState *s)
     cup2006_ata_put_string(b, 23, 8, "00000253");
     cup2006_ata_put_string(b, 27, 40, "VOLVO RTI HDD");
     cup2006_ata_put_word(b, 47, 0x8001);  /* max multiple */
-    cup2006_ata_put_word(b, 49, 0x0200);  /* LBA supported */
+    cup2006_ata_put_word(b, 49, 0x0300);  /* LBA + DMA supported */
     cup2006_ata_put_word(b, 53, 0x0007);  /* words 54-58, 64-70, 88 valid */
     cup2006_ata_put_word(b, 54, 16383);
     cup2006_ata_put_word(b, 55, 16);
