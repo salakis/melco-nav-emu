@@ -298,7 +298,9 @@ static void cup2006_drf_write(void *opaque, hwaddr addr, uint64_t value,
     if (s->drf_program_pending && addr == s->drf_program_addr) {
         s->drf_program_pending = false;
         for (i = 0; i < size && addr + i < CUP2006_DRF_SIZE; i++) {
-            s->drf_data[addr + i] = (v >> (8 * i)) & 0xff;
+            /* AMD NOR: a program cycle can only clear bits; the result is
+             * old & new (only an erase sets bits back to 1). */
+            s->drf_data[addr + i] &= (v >> (8 * i)) & 0xff;
         }
         cup2006_drf_mark_dirty(s, addr, size);
         return;
