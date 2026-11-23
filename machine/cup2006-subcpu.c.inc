@@ -1479,7 +1479,11 @@ static void cup2006_scif0_write(Cup2006MachineState *s, hwaddr base,
     for (i = 0; i < size; i++) {
         hwaddr off = addr + i;
 
-        if (off == CUP2006_SCIF0_SCFTDR && s->keys) {
+        /* The ACK consumer runs for the Sub-CPU link too (subpeer=on with
+         * keys=off still needs the guest's 0x06 to retire peer frames); the
+         * key-report paths inside stay inert without keys=on because no
+         * input handler is registered then. */
+        if (off == CUP2006_SCIF0_SCFTDR && (s->keys || s->subpeer)) {
             cup2006_key_guest_tx(s, (value >> (8 * i)) & 0xff);
         }
         if (off == CUP2006_SCIF0_SCFTDR && s->subpeer) {

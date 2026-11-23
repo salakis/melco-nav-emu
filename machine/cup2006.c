@@ -1283,6 +1283,9 @@ static void cup2006_mbx_draw_marker(Cup2006MachineState *s)
     }
     for (k = 0; k < 4; k++) {
         memcpy(&vp[k], &b[(vi + k) * 2 + 1], 4);
+        if (!isfinite(vp[k])) {
+            return;                 /* a non-finite viewport is not drawable */
+        }
     }
     for (i = ti; i + 24 <= n && nt < 16; i += 25) {
         float v[24], ys = 0, nx = 0, ny = 0, nz = 0;
