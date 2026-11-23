@@ -16,7 +16,7 @@ under each unit's "Limitations and STUBs" below. The models are tested on
 macOS (Apple Silicon); Linux builds the same way but is untested.
 
 One deliberate exception to "hardware only": on a CU-P2006's first power-on
-the host-side launcher (`tools/unit.py`) writes the unit's own map-install
+the host-side launcher (`python -m melco_nav_emu.unit`) writes the unit's own map-install
 record into its battery RAM, because the served HDD already holds the complete
 map install and there is no real install process to run (marked `STUB` there;
 see "CU-P2006 unit state" below). For the same reason no UI screenshots are
@@ -157,7 +157,7 @@ in `build/hdd/`, shared by all units.
   install as complete (STUB: the HDD already holds the complete install, so
   the unit's install record says so).
 - `CUP2006_UNIT=<dir> make boot` uses another unit directory.
-- `python3 tools/unit.py show build/unit` prints what a unit's memory says.
+- `.venv/bin/python -m melco_nav_emu.unit show build/unit` prints what a unit's memory says.
 
 ### Disc sets, region and marque
 
@@ -199,7 +199,7 @@ CUP2006_SCENARIO=eu-a4 make boot
 
 On a new unit the first fix comes about 35 s after power-on; the recording
 ends at about 180 s, after which the receiver reports signal loss. Your own
-recordings go in `build/gps/<name>/` (gitignored); `tools/gps/README.md`
+recordings go in `build/gps/<name>/` (gitignored); `src/melco_nav_emu/gnss/README.md`
 explains how they are made and the file formats (`drive.replay` for the radio
 chip, `sensors.csv` for the car's wheel and gyro sensors on the same clock).
 
@@ -251,7 +251,7 @@ A scenario directory holds:
   MOST. **CU-P2006** consumes the wheel and yaw columns (`gpstrack=`); its
   position columns are not used, because the fix comes from `drive.replay`.
 - `motion.csv`, `track.gpx`, `route.json`: intermediate products of the
-  scenario build (`tools/gps/README.md`).
+  scenario build (`src/melco_nav_emu/gnss/README.md`).
 
 ## Options reference
 
@@ -269,9 +269,10 @@ A scenario directory holds:
 | `DISPLAY_BACKEND=sdl` / `none` | both | QEMU display backend instead of the per-unit default (`cocoa,zoom-to-fit=on` on macOS, `sdl` elsewhere) |
 | `-machine verbose=on` | both | log device activity on stderr |
 
-The default `make boot` uses `tools/profile.py` for CU-P2006 and
-`src/melco_nav_emu/cli.py` for CUP28; when you invoke the profile directly it
-passes extra arguments to QEMU.
+The default `make boot` runs `python -m melco_nav_emu.cli boot`, which
+dispatches to the board module in `src/melco_nav_emu/boards/`; extra QEMU
+arguments go after `--`, e.g.
+`.venv/bin/python -m melco_nav_emu.cli boot --model cup28 -- --trace 'cup28_*'.
 
 ## Layout
 
@@ -285,10 +286,10 @@ scenarios/          two 3-minute GPS drives (OpenStreetMap-based, ODbL 1.0:
                     see scenarios/LICENSE)
 scripts/            build QEMU, extract the discs, carve the firmware,
                     build and verify the HDD
-tools/gps/          make GPS scenarios from OpenStreetMap
-tools/profile.py    CU-P2006 boot and media preparation
-tools/unit.py       a CU-P2006 unit's persistent state
-src/melco_nav_emu/  Python package (image parsers, QMP client, CLI)
+src/melco_nav_emu/  Python package: image parsers, QMP client, CLI,
+                    boards/ (per-machine launchers), gnss/ (make GPS
+                    scenarios from OpenStreetMap), unit.py (a unit's
+                    persistent state)
 tests/              offline unit tests
 ```
 
