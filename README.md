@@ -213,6 +213,13 @@ board-specific machine options.
 - **Shared disk.** The guest's writes to the shared HDD image are kept in
   memory for the session only (a unit with its own `build/unit/hdd.img`
   writes to that file). The DVD drive serves ISO images read-only.
+- **DU interrupt.** The DU model raises INTEVT 0x780 with every DIER enable
+  clear, which the SH7785 manual does not describe; the guest relies on the
+  line, so it is kept as-is (STUB departure, noted here deliberately).
+- **DVD reply address.** The drive's replies are also written to one fixed
+  guest virtual address from one firmware build (the driver does not program
+  that address in any modelled register), translated through the current
+  process's MMU. STUB, kept because the product driver reads the reply there.
 - Untested: Linux hosts, big-endian hosts, disc sets other than `EU-3350-00`.
 
 ## Layout
