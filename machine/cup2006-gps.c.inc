@@ -97,9 +97,12 @@ static bool cup2006_gnss_radio_tick(Cup2006MachineState *s)
     now = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL);
     if (rp->start < 0) {
         rp->start = now;
-        /* One scenario clock for radio, wheel pulses and gyro. This is
+        /* One scenario clock for radio, wheel pulses and gyro: keep the
+         * clock that started with the track (gpstrack=), if any.  This is
          * host-side sensor timing, not a change to any guest state. */
-        s->gps_track_start_ms = now;
+        if (!s->gps_track_start_ms) {
+            s->gps_track_start_ms = now;
+        }
     }
     /* Keep the pending message intact until acknowledgement: OR-ing another
      * cause over a different payload would make the type bits and the payload
@@ -324,6 +327,12 @@ static void cup2006_gps_load_track(Cup2006MachineState *s)
     if (s->gps_track_dt <= 0) {
         s->gps_track_dt = 1.0;
     }
+    /* One scenario clock for radio, wheel pulses and gyro starts when the
+     * track is loaded, so gpstrack= alone (no gnssreplay=) still drives the
+     * wheel and gyro; this is host-side sensor timing, not guest state. */
+    if (!s->gps_track_start_ms) {
+        s->gps_track_start_ms = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL);
+    }
     cup2006_info(s, "cup2006: car sensor track: %u rows from %s (%.1f Hz)%s",
                  s->gps_track_n, s->gpstrack, 1.0 / s->gps_track_dt,
                  (s->gnssreplay && *s->gnssreplay) ? "" :
@@ -372,7 +381,7 @@ static uint64_t cup2006_gps_read(Cup2006MachineState *s, hwaddr base,
         value = (value >> ((addr & 3) * 8)) & ((1ull << (size * 8)) - 1);
     }
     cup2006_gps_note(s, phys, false, size, value);
-    qemu_log_mask(LOG_GUEST_ERROR,
+    cup2006_dbg(s,
                   "cup2006: gps read pc=0x%08" PRIx32
                   " addr=0x%08" HWADDR_PRIx " size=%u value=0x%" PRIx64 "\n",
                   cup2006_guest_pc(), phys, size, value);
@@ -404,7 +413,7 @@ static void cup2006_gps_write(Cup2006MachineState *s, hwaddr base,
         cup2006_gps_update_irq(s);
     }
     cup2006_gps_note(s, phys, true, size, value);
-    qemu_log_mask(LOG_GUEST_ERROR,
+    cup2006_dbg(s,
                   "cup2006: gps write pc=0x%08" PRIx32
                   " addr=0x%08" HWADDR_PRIx " size=%u value=0x%" PRIx64 "\n",
                   cup2006_guest_pc(), phys, size, value);
