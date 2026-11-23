@@ -35,7 +35,8 @@ if str(ROOT) not in sys.path:      # tools.* lives at the repo root (phase 0)
 
 QEMU = ROOT / "qemu/src/build/qemu-system-sh4"
 OUT_BASE = ROOT / "build" / "bootcheck"
-TEMPLATE = OUT_BASE / "template"          # a pristine unit to copy, if present
+# A pristine per-board unit to copy, if present (template/<board>/unit).
+TEMPLATE = OUT_BASE / "template"
 
 # Per-board defaults (chosen in spike S2, phase 0.2).  cup2006's headless
 # serial console prints almost nothing, so its boot progress is judged from
@@ -47,6 +48,10 @@ DEFAULTS = {
         "keys": ["240:right", "250:ret"],
         "disc": None,
         "scenario": None,
+        # With the launcher's shift=auto,sleep=on the serial-poll MMIO count
+        # varies by more than the compare tolerance between identical boots;
+        # a fixed shift makes the run deterministic (spike S2).
+        "icount": "shift=3,sleep=off",
     },
     "cup28": {
         "seconds": 150,
@@ -54,6 +59,7 @@ DEFAULTS = {
         "keys": [],
         "disc": None,      # falls back to $CUP28_DISC
         "scenario": None,
+        "icount": None,    # the launcher's shift=auto,sleep=on is stable here
     },
 }
 
@@ -131,7 +137,7 @@ def _board_argv(board: str, unit: Path, outdir: Path, disc: Optional[str],
     raise SystemExit("bootcheck: unknown board %r" % board)
 
 
-def _fresh_unit(outdir: Path, unit_arg: Optional[str]) -> Path:
+def _fresh_unit(outdir: Path, unit_arg: Optional[str], board: str) -> Path:
     if unit_arg:
         unit = Path(unit_arg)
         if not unit.is_absolute():
@@ -141,8 +147,9 @@ def _fresh_unit(outdir: Path, unit_arg: Optional[str]) -> Path:
     unit = outdir / "unit"
     if unit.exists():
         shutil.rmtree(unit)
-    if (TEMPLATE / "unit").is_dir():
-        shutil.copytree(TEMPLATE / "unit", unit)
+    template = TEMPLATE / board / "unit"
+    if template.is_dir():
+        shutil.copytree(template, unit)
     else:
         unit.mkdir(parents=True)
     return unit
@@ -171,14 +178,15 @@ def cmd_run(args: argparse.Namespace) -> int:
     keys = args.keys.split(",") if args.keys else list(defaults["keys"])
     disc = args.disc or defaults["disc"]
     scenario = args.scenario or defaults["scenario"]
+    icount = args.icount if args.icount is not None else defaults["icount"]
     label = args.label
     if not re.fullmatch(r"[A-Za-z0-9._-]+", label):
         raise SystemExit("bootcheck: --label must be [A-Za-z0-9._-]+")
 
     outdir = OUT_BASE / label
     outdir.mkdir(parents=True, exist_ok=True)
-    unit = _fresh_unit(outdir, args.unit)
-    argv = _board_argv(board, unit, outdir, disc, scenario, args.icount)
+    unit = _fresh_unit(outdir, args.unit, board)
+    argv = _board_argv(board, unit, outdir, disc, scenario, icount)
 
     console = outdir / "console.log"
     if board == "cup28":
