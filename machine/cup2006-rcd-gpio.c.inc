@@ -195,9 +195,10 @@ static uint64_t cup2006_gpio_read(Cup2006MachineState *s, hwaddr base,
                     value |= CUP2006_GPIO_SHUTTER_PIN;
                 }
             }
-            if (s->acckey && port == CUP2006_GPIO_ACC_PORT) {
-                /* ACC/ignition (bit 19) and MOST/LAN-alive (bit 20) levels,
-                 * driven only by the acckey control. */
+            if (port == CUP2006_GPIO_ACC_PORT) {
+                /* ACC/ignition (bit 19) and MOST/LAN-alive (bit 20) levels
+                 * follow acc_on (normally high); acckey=on only lets F12
+                 * change acc_on from the QEMU input layer. */
                 if (s->acc_on) {
                     value |= CUP2006_GPIO_ACC_PIN;
                 }
