@@ -168,6 +168,12 @@ struct Cup28MachineState {
 
 /* Data shared across files. */
 extern const MemoryRegionOps cup28_drf_alias_ops;
+extern const MemoryRegionOps cup28_rtc_ops;
+extern const MemoryRegionOps cup28_dvd_port_ops;
+extern const MemoryRegionOps cup28_dvd_ctrl_ops;
+extern const MemoryRegionOps cup28_eeprom_ops;
+extern const MemoryRegionOps cup28_flr_ops;
+extern const MemoryRegionOps cup28_q2_ops;
 
 /* Functions called across files (non-static, cup28_ prefix kept). */
 void cup28_audio_init(Cup28MachineState *s, MemoryRegion *mem,

@@ -289,12 +289,12 @@ static void cup28_dvd_ctrl_write(void *opaque, hwaddr addr, uint64_t value,
     cup28_sns_irq(s);
 }
 
-static const MemoryRegionOps cup28_dvd_port_ops = {
+const MemoryRegionOps cup28_dvd_port_ops = {
     .read = cup28_dvd_port_read, .write = cup28_dvd_port_write,
     .valid.min_access_size = 1, .valid.max_access_size = 4,
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
-static const MemoryRegionOps cup28_dvd_ctrl_ops = {
+const MemoryRegionOps cup28_dvd_ctrl_ops = {
     .read = cup28_dvd_ctrl_read, .write = cup28_dvd_ctrl_write,
     .valid.min_access_size = 1, .valid.max_access_size = 4,
     .endianness = DEVICE_LITTLE_ENDIAN,
@@ -344,7 +344,7 @@ static void cup28_eeprom_write(void *opaque, hwaddr addr, uint64_t value,
     }
 }
 
-static const MemoryRegionOps cup28_eeprom_ops = {
+const MemoryRegionOps cup28_eeprom_ops = {
     .read = cup28_eeprom_read, .write = cup28_eeprom_write,
     .valid.min_access_size = 1, .valid.max_access_size = 4,
     .endianness = DEVICE_LITTLE_ENDIAN,
@@ -375,7 +375,7 @@ static void cup28_flr_write(void *opaque, hwaddr addr, uint64_t value,
     }
 }
 
-static const MemoryRegionOps cup28_flr_ops = {
+const MemoryRegionOps cup28_flr_ops = {
     .read = cup28_flr_read, .write = cup28_flr_write,
     .valid.min_access_size = 1, .valid.max_access_size = 4,
     .endianness = DEVICE_LITTLE_ENDIAN,

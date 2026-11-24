@@ -1,5 +1,10 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later
- * Copyright (c) 2026 melco-nav-emu contributors */
+/*
+ * Volvo VNS CUP28 board: RTC (calendar) registers.
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright (c) 2026 melco-nav-emu contributors
+ */
+
+#include "cup28-internal.h"
 
 #define CUP28_RTC_LATCH       0x0002
 #define CUP28_RTC_STATUS      0x0004
@@ -106,7 +111,7 @@ static void cup28_rtc_write(void *opaque, hwaddr addr, uint64_t value,
     }
 }
 
-static const MemoryRegionOps cup28_rtc_ops = {
+const MemoryRegionOps cup28_rtc_ops = {
     .read = cup28_rtc_read,
     .write = cup28_rtc_write,
     .valid.min_access_size = 1,

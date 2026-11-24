@@ -955,7 +955,7 @@ static void cup28_q2_write(void *opaque, hwaddr addr, uint64_t value,
     cup28_q2_irq(s);
 }
 
-static const MemoryRegionOps cup28_q2_ops = {
+const MemoryRegionOps cup28_q2_ops = {
     .read = cup28_q2_read,
     .write = cup28_q2_write,
     .valid.min_access_size = 1,
