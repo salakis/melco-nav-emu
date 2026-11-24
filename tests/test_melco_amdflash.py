@@ -59,28 +59,30 @@ int main(void)
     /* sector erase after the full 80 AA 55 sequence fills 0xff */
     arr[0x2000] = 0x00;
     unlock55();
-    assert(wr(0x2aa8, 0x80808080, 4));      /* 80 */
-    assert(wr(0x2aa8, 0xaaaaaaaa, 4));      /* AA */
-    assert(wr(0x1554, 0x55555555, 4));      /* 55: armed */
+    wr(0x2aa8, 0x80808080, 4);              /* 80 */
+    wr(0x2aa8, 0xaaaaaaaa, 4);              /* AA */
+    wr(0x1554, 0x55555555, 4);              /* 55: armed */
     assert(wr(0x2123, 0x30303030, 4));      /* 30 erases the sector */
     assert(op == MELCO_AMDFLASH_OP_SECTOR_ERASE);
     assert(off == 0x2000 && len == SECTOR);
     assert(arr[0x2000] == 0xff && arr[0x2000 + SECTOR - 1] == 0xff);
     assert(arr[0x1fff] == 0xff);            /* untouched neighbour */
 
-    /* chip erase: 80 AA 55 10 */
+    /* chip erase: 80 AA 55 10 (F0 first, as the guests do) */
     arr[0x100] = 0x00;
+    wr(0x0, 0xf0f0f0f0, 4);
     unlock55();
     wr(0x2aa8, 0x80808080, 4);
     wr(0x2aa8, 0xaaaaaaaa, 4);
     wr(0x1554, 0x55555555, 4);
-    assert(wr(0x0, 0x10101010, 4));
+    assert(wr(0x0, 0x10101010, 4));         /* 10: chip erase */
     assert(op == MELCO_AMDFLASH_OP_CHIP_ERASE && off == 0 && len == SZ);
     assert(arr[0x100] == 0xff);
 
     /* autoselect: 90 serves the IDs at the bank base */
+    wr(0x0, 0xf0f0f0f0, 4);
     unlock55();
-    wr(0x2aa8, 0x90909090, 4);
+    wr(0x2aa8, 0x90909090, 4);              /* 90: autoselect */
     assert(c.autoselect);
     assert(melco_amdflash_core_read(&c, 0x0, 2) == 0x0001);   /* manufacturer */
     assert(melco_amdflash_core_read(&c, 0x2, 2) == 0x227e);   /* device */
@@ -92,8 +94,10 @@ int main(void)
     /* interleave 2: commands with the byte in two lanes (0x00aa00aa) */
     melco_amdflash_core_init(&c, arr, SZ, SECTOR, 2, 0x0001, 0x227e);
     memset(arr, 0xff, SZ);
-    assert(wr(0x2aa8, 0x00aa00aa, 4));
-    assert(wr(0x1554, 0x00550055, 4));
+    assert(wr(0x2aa8, 0x00aa00aa, 4) == false);  /* AA: no array change */
+    assert(c.state == MELCO_AMDFLASH_ST_U1);
+    wr(0x1554, 0x00550055, 4);
+    assert(c.state == MELCO_AMDFLASH_ST_U2);
     assert(!wr(0x1000, 0x00a000a0, 4));     /* A0 */
     assert(c.program_pending && c.program_addr == 0x1000);
     assert(wr(0x1000, 0x0000000f, 4));      /* data write, one lane */
