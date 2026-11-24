@@ -206,17 +206,16 @@ static void cup28_sns_tick(void *opaque)
     int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
     int32_t gyro = CUP28_SNS_GYRO_CENTRE;
 
-    if (s->gps_track_n) {
+    if (s->track) {
         int64_t ms = now / 1000000;
-        const Cup28TrackSample *sample = cup28_track_row(s, ms);
-        double pulses = s->p28_sns_pulse_fraction +
-                        fabs(cup28_wheel_distance(s, ms)) *
-                        CUP28_SNS_PULSES_PER_M;
-        /* ClassLib 0x0153be94 rejects deltas above 19. Carry any
-         * excess forward if a timer callback ran late. */
-        unsigned whole = MIN(pulses, 19.0);
+        const MelcoSample *sample = melco_track_sample(s->track, ms);
+        /* ClassLib 0x0153be94 rejects deltas above 19.  melco_pulses caps
+         * the delta and carries any excess forward if a timer callback
+         * ran late. */
+        unsigned whole = melco_pulses(&s->p28_sns_pulse_fraction,
+                                      melco_track_odometer_m(s->track, ms),
+                                      CUP28_SNS_PULSES_PER_M, 19);
 
-        s->p28_sns_pulse_fraction = pulses - whole;
         s->p28_most_wheel_counter += whole;
         if (s->p28_most_wheel_on && s->p28_most_vc_complete) {
             cup28_most_wheel_send(s);

@@ -13,6 +13,7 @@
 #include "qemu/audio.h"
 #include "melco-nvram.h"
 #include "melco-amdflash.h"
+#include "melco-sensors.h"
 #include "qobject/qdict.h"
 #include "system/block-backend.h"
 #include "system/block-backend-global-state.h"
@@ -49,12 +50,6 @@ OBJECT_DECLARE_SIMPLE_TYPE(Cup28MachineState, CUP28_MACHINE)
 #define CUP28_FLASH_SECTOR (256 * KiB)
 #define CUP28_FIRMWARE_OFFSET 0x80000
 
-typedef struct Cup28TrackSample {
-    double latitude, longitude, altitude;
-    double speed_kmh, heading_deg, yaw_dps;
-    bool fix_valid;
-} Cup28TrackSample;
-
 struct Cup28MachineState {
     MachineState parent_obj;
 
@@ -77,10 +72,7 @@ struct Cup28MachineState {
     int64_t rtc_base_s, rtc_base_ms;
     uint16_t rtc_set[6];
 
-    GArray *track;
-    unsigned gps_track_n;
-    int64_t track_interval_ms, track_start_ms, wheel_track_last_ms;
-    Cup28TrackSample track_stopped;
+    MelcoTrack *track;          /* car-sensor track (melco-sensors.c) */
     MemoryRegion p28_uart_container;
     MemoryRegion p28_q2_regs;
     uint8_t p28_q2_reg[0x800];
@@ -187,7 +179,6 @@ static void cup28_register_write(uint8_t *regs, hwaddr addr, uint64_t value,
     }
 }
 
-#include "cup28-track.c.inc" 
 #include "cup28-rtc.c.inc"
 #include "cup28-flash.c.inc"
 #include "cup28-dmac.c.inc"
@@ -432,7 +423,13 @@ static void cup28_init(MachineState *machine)
     cup28_storage_init(s, mem, cpu);
     cup28_display_init(s, mem, cpu);
     if (s->gpstrack && *s->gpstrack) {
-        cup28_track_load(s);
+        Error *err = NULL;
+
+        s->track = melco_track_load(s->gpstrack, &err);
+        if (!s->track) {
+            error_report("cup28: %s", error_get_pretty(err));
+            exit(1);
+        }
     }
     cup28_dmac_init(s, mem, cpu);
     cup28_audio_init(s, mem, machine->audiodev);
@@ -488,7 +485,7 @@ static void cup28_finalize(Object *obj)
     if (s->most_input) {
         qemu_input_handler_unregister(s->most_input);
     }
-    g_clear_pointer(&s->track, g_array_unref);
+    melco_track_free(s->track);
 }
 
 static void cup28_class_init(ObjectClass *oc, const void *data)

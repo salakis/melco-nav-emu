@@ -344,7 +344,7 @@ static void cup28_most_chip_write(Cup28MachineState *s, uint8_t map, uint8_t byt
             }
             /* F5/001 Set subscription to vehicle property 0x0201.
              * The guest sends this one-property request on startup. */
-            if (type == 0 && peer && s->gps_track_n &&
+            if (type == 0 && peer && s->track &&
                 !s->p28_most_wheel_on && r[0xc4] == 0xf5 && r[0xc5] == 1 &&
                 r[0xc6] == 0 && r[0xc7] == 0x10 && r[0xc8] == 5 &&
                 r[0xc9] == 1 && r[0xcc] == 2 && r[0xcd] == 1) {
@@ -666,16 +666,16 @@ static bool cup28_most_gps_send(Cup28MachineState *s)
     uint8_t rec[26] = { 0 };
     double lat = 37.774900, lon = -122.419400, kmh = 0, hdg = 0, alt = 20;
     int64_t now = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL);
-    const Cup28TrackSample *sample = s->gps_track_n ?
-                                    cup28_track_row(s, now) : NULL;
+    const MelcoSample *sample = s->track ?
+                                melco_track_sample(s->track, now) : NULL;
     int64_t t = now / 1000;
 
-    bool valid = !sample || sample->fix_valid;
+    bool valid = !sample || sample->fix;
 
     if (sample && valid) {
-        lat = sample->latitude;
-        lon = sample->longitude;
-        alt = sample->altitude;
+        lat = sample->lat_deg;
+        lon = sample->lon_deg;
+        alt = sample->alt_m;
         kmh = sample->speed_kmh;
         hdg = sample->heading_deg;
     }

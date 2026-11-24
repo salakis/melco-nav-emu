@@ -152,12 +152,12 @@ def test_boot_cup2006_unit_env_fallbacks(tmp_path, monkeypatch):
 
 def test_shipped_scenarios_match_the_cup28_track_format():
     # The README tells CUP28 users to pass scenarios/<name>/sensors.csv to
-    # --track, so the shipped CSVs must keep the header cup28-track.c.inc
-    # parses.
+    # --track, so the shipped CSVs must keep the header the shared
+    # melco-sensors loader parses.
     root = Path(__file__).resolve().parents[1]
-    source = (root / "machine" / "cup28-track.c.inc").read_text()
-    match = re.search(r'static const char header\[\] =\s*"([^"]+)"', source)
-    assert match, "cup28 track header not found in machine/cup28-track.c.inc"
+    source = (root / "machine" / "melco-sensors-core.c").read_text()
+    match = re.search(r'#define MELCO_TRACK_HEADER.*?"([^"]+)"', source, re.S)
+    assert match, "track header not found in machine/melco-sensors-core.c"
     header = match.group(1)
     scenarios = sorted((root / "scenarios").glob("*/sensors.csv"))
     assert scenarios, "no shipped GPS scenarios"
