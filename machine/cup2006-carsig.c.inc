@@ -88,20 +88,16 @@ static void cup2006_carsig_tick(void *opaque)
     timer_mod(s->carsig_timer, s->carsig_deadline_ns);
 }
 
-static const float *cup2006_track_row(Cup2006MachineState *s, int64_t now_ms,
-                                      unsigned *idx);
-
 static uint32_t cup2006_carsig_gyro(Cup2006MachineState *s)
 {
     double yaw = 0;
     long v;
 
-    if (s->gps_track_n && s->gps_track_start_ms) {
-        unsigned idx;
-        const float *row = cup2006_track_row(
-            s, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL), &idx);
+    if (s->track && s->gps_track_start_ms) {
+        const MelcoSample *sample = melco_track_sample(
+            s->track, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
 
-        yaw = row[5];                      /* deg/s, clockwise positive */
+        yaw = sample->yaw_dps;             /* deg/s, clockwise positive */
     }
     v = lrint(CUP2006_GYRO_ZERO - yaw * CUP2006_GYRO_PER_DPS);
     return (uint32_t)MAX(0, MIN(16380, v));

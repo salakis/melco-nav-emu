@@ -26,8 +26,22 @@ static void cup2006_gps_update_irq(Cup2006MachineState *s)
     }
     sh_intc_toggle_source(src, 0, want ? 1 : -1);
 }
-static const float *cup2006_track_row(Cup2006MachineState *s, int64_t now_ms,
-                                      unsigned *idx);
+/*
+ * The scenario clock for the car-sensor track (wheel pulses and gyro): it
+ * starts when the track is loaded, or with the radio replay below, as
+ * before.  melco_track_start() is a first-call-wins clock start, so a load
+ * at virtual time 0 defers to the first use exactly like the old
+ * gps_track_start_ms == 0 check did.
+ */
+static void cup2006_track_clock_start(Cup2006MachineState *s, int64_t now_ms)
+{
+    if (!s->gps_track_start_ms) {
+        s->gps_track_start_ms = now_ms;
+        if (now_ms && s->track) {
+            melco_track_start(s->track, now_ms);
+        }
+    }
+}
 
 /* Post one device->host mailbox message at +0x800 (header: +0 u32
  * +4 u16 len, +6 u8 xor-fold of the payload words), set the cause bit(s)
@@ -98,9 +112,7 @@ static bool cup2006_gnss_radio_tick(Cup2006MachineState *s)
         /* One scenario clock for radio, wheel pulses and gyro: keep the
          * clock that started with the track (gpstrack=), if any.  This is
          * host-side sensor timing, not a change to any guest state. */
-        if (!s->gps_track_start_ms) {
-            s->gps_track_start_ms = now;
-        }
+        cup2006_track_clock_start(s, now);
     }
     /* Keep the pending message intact until acknowledgement: OR-ing another
      * cause over a different payload would make the type bits and the payload
@@ -220,116 +232,6 @@ static void cup2006_gps_tick(void *opaque)
 }
 
 
-/*
- * The track clock: row = time since the first use / row interval. Tracks
- * loop; finite radio replays stop at EOF.
- */
-static const float *cup2006_track_row(Cup2006MachineState *s, int64_t now_ms,
-                                      unsigned *idx)
-{
-    uint64_t i;
-
-    if (!s->gps_track_start_ms) {
-        s->gps_track_start_ms = now_ms;
-    }
-    i = (uint64_t)((now_ms - s->gps_track_start_ms) /
-                   (s->gps_track_dt * 1000.0));
-    if ((s->gnssreplay && *s->gnssreplay)) {
-        *idx = (unsigned)MIN(i, s->gps_track_n - 1);
-        if (i >= s->gps_track_n) {
-            /* STUB: a finite recording ends at rest; only host sensor
-             * values are stopped, the guest's last fix is never changed. */
-            memcpy(s->gps_track_stopped, &s->gps_track[*idx * 7],
-                   sizeof(s->gps_track_stopped));
-            s->gps_track_stopped[3] = 0;
-            s->gps_track_stopped[5] = 0;
-            s->gps_track_stopped[6] = 0;
-            return s->gps_track_stopped;
-        }
-    } else {
-        *idx = (unsigned)(i % s->gps_track_n);
-    }
-    return &s->gps_track[*idx * 7];
-}
-
-/* Integrate the transducer input on the scenario clock, independently of
- * serial delivery latency. A late UART report must not shorten the drive.
- * Speed is held over each source sample, as in the track sampler above. */
-static double cup2006_wheel_distance(Cup2006MachineState *s, int64_t now_ms)
-{
-    double dt = s->gps_track_dt * 1000.0;
-    double from = MAX(s->wheel_track_last_ms, s->gps_track_start_ms) -
-                  s->gps_track_start_ms;
-    double to = now_ms - s->gps_track_start_ms;
-    double metres = 0;
-    bool finite = (s->gnssreplay && *s->gnssreplay);
-
-    s->wheel_track_last_ms = now_ms;
-    while (from < to) {
-        uint64_t i = (uint64_t)floor(from / dt);
-        double end = MIN(to, (i + 1) * dt);
-
-        if (finite && i >= s->gps_track_n) {
-            break;
-        }
-        metres += s->gps_track[(i % s->gps_track_n) * 7 + 3] / 3.6 *
-                  ((end - from) / 1000.0);
-        from = end;
-    }
-    return metres;
-}
-
-static void cup2006_gps_load_track(Cup2006MachineState *s)
-{
-    FILE *f = fopen(s->gpstrack, "r");
-    char line[256];
-    unsigned cap = 0;
-    double t0 = 0;
-
-    if (!f) {
-        error_report("cup2006: gpstrack %s: cannot open", s->gpstrack);
-        exit(1);
-    }
-    while (fgets(line, sizeof(line), f)) {
-        double t, la, lo, al, sp, hd, yw = 0, ok = 1;
-        int nf = sscanf(line, "%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf", &t, &la, &lo,
-                        &al, &sp, &hd, &yw, &ok);
-
-        if (nf < 6) {
-            continue;
-        }
-        if (s->gps_track_n == 1) {
-            s->gps_track_dt = t - t0;
-        }
-        if (s->gps_track_n == 0) {
-            t0 = t;
-        }
-        if (s->gps_track_n == cap) {
-            cap = cap ? cap * 2 : 1024;
-            s->gps_track = g_renew(float, s->gps_track, cap * 7);
-        }
-        float *r = &s->gps_track[s->gps_track_n++ * 7];
-        r[0] = la; r[1] = lo; r[2] = al; r[3] = sp; r[4] = hd; r[5] = yw;
-        r[6] = nf >= 8 ? ok : 1;
-    }
-    fclose(f);
-    if (!s->gps_track_n) {
-        error_report("cup2006: gpstrack %s: no rows", s->gpstrack);
-        exit(1);
-    }
-    if (s->gps_track_dt <= 0) {
-        s->gps_track_dt = 1.0;
-    }
-    /* One scenario clock for radio, wheel pulses and gyro starts when the
-     * track is loaded, so gpstrack= alone (no gnssreplay=) still drives the
-     * wheel and gyro; this is host-side sensor timing, not guest state. */
-    if (!s->gps_track_start_ms) {
-        s->gps_track_start_ms = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL);
-    }
-    /* Trace events take no floats: the rate becomes milli-Hz. */
-    trace_cup2006_gps_car_sensor_track_rows(s->gps_track_n, s->gpstrack, (int32_t)lrint(1000.0 / s->gps_track_dt), (s->gnssreplay && *s->gnssreplay) ? "" :
-                 "; no GNSS recording, the receiver has no signal");
-}
 
 static uint64_t cup2006_gps_read(Cup2006MachineState *s, hwaddr base,
                                  hwaddr addr, unsigned size)

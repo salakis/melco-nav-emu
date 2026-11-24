@@ -1174,12 +1174,11 @@ static void cup2006_key_enqueue(Cup2006MachineState *s, int code, bool raw)
 static void cup2006_wheel_tick(void *opaque)
 {
     Cup2006MachineState *s = opaque;
-    double p;
     long n;
 
     timer_mod(s->wheel_timer, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) +
               CUP2006_WHEEL_PERIOD_MS);
-    if (!s->gps_track_n || !s->gps_track_start_ms) {
+    if (!s->track || !s->gps_track_start_ms) {
         return;                          /* NEventWatcher not reading yet */
     }
     /* Start once the Sub-CPU link is up: the guest has taken the startup
@@ -1208,12 +1207,14 @@ static void cup2006_wheel_tick(void *opaque)
         /* Feed the distance as real pulses: the CARSIG model samples every
          * 20 ms (a sample counter at +0x0004 is not a pulse count); without
          * pulses the guest's locator assumes the car is parked and the
-         * position moves in jumps. */
-        p = cup2006_wheel_distance(s, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL)) *
-            CUP2006_PULSES_PER_M + s->wheel_carry;
+         * position moves in jumps.  melco_pulses keeps the fraction (and,
+         * past 32767, the excess) in the carry, as the old clamp did. */
+        n = (long)melco_pulses(&s->wheel_carry,
+                               melco_track_odometer_m(
+                                   s->track,
+                                   qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL)),
+                               CUP2006_PULSES_PER_M, INT16_MAX);
     }
-    n = MAX(INT16_MIN, MIN(INT16_MAX, lrint(floor(p))));
-    s->wheel_carry = p - n;
     if (s->key_q_n >= 8) {
         s->wheel_carry += n;              /* defer, never lose distance */
         return;

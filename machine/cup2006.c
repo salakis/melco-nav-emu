@@ -26,6 +26,7 @@
 #include "qemu/error-report.h"
 #include "melco-nvram.h"
 #include "melco-amdflash.h"
+#include "melco-sensors.h"
 #include "qobject/qdict.h"
 #include "system/block-backend.h"
 #include "system/block-backend-global-state.h"
@@ -852,12 +853,9 @@ struct Cup2006MachineState {
     struct intc_source *gps_intc_src;
     bool gps_handshake;            /* 0xA5 reset written, state reads 1 */
     uint64_t gps_ticks;
-    unsigned gps_track_n;
-    float *gps_track;              /* rows of 7: lat lon alt kmh hdg yaw gps */
-    float gps_track_stopped[7];    /* finite replay endpoint, no more motion */
-    int64_t wheel_track_last_ms;   /* physical pulse counter's integration time */
-    double gps_track_dt;           /* seconds per row */
-    int64_t gps_track_start_ms;
+    MelcoTrack *track;             /* car-sensor track (melco-sensors.c) */
+    int64_t gps_track_start_ms;    /* scenario clock start, shared with the
+                                    * GNSS radio replay (gnssreplay=) */
     /* Measurement-level GNSS feed: host-assigned PRN per channel. */
     int gnss_chan_prn[12];         /* PRN 1..32, 0 = unassigned */
     /* RCD remote-control window at 0xFF937000 (STUB shadow). */
@@ -2058,8 +2056,24 @@ static void cup2006_init(MachineState *machine)
                                    cup2006_carsig_tick, s);
     if (s->gpstrack && s->gpstrack[0]) {
         struct intc_desc *desc = cpu->env.intc_handle;
+        Error *err = NULL;
 
-        cup2006_gps_load_track(s);
+        s->track = melco_track_load(s->gpstrack, &err);
+        if (!s->track) {
+            error_report("cup2006: %s", error_get_pretty(err));
+            exit(1);
+        }
+        /* One scenario clock for radio, wheel pulses and gyro starts when
+         * the track is loaded, so gpstrack= alone (no gnssreplay=) still
+         * drives the wheel and gyro; this is host-side sensor timing, not
+         * guest state. */
+        cup2006_track_clock_start(s, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+        /* Trace events take no floats: the rate becomes milli-Hz. */
+        trace_cup2006_gps_car_sensor_track_rows(
+            melco_track_rows(s->track), s->gpstrack,
+            (int32_t)lrint(1000000.0 / melco_track_interval_ms(s->track)),
+            (s->gnssreplay && *s->gnssreplay) ? "" :
+            "; no GNSS recording, the receiver has no signal");
         for (unsigned i = 0; desc && i < desc->nr_sources; i++) {
             struct intc_source *src = &desc->sources[i];
 
