@@ -1,5 +1,10 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later
- * Copyright (c) 2026 melco-nav-emu contributors */
+/*
+ * Volvo VNS CUP28 board: DMAC (DVD-source DMA transfers).
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright (c) 2026 melco-nav-emu contributors
+ */
+
+#include "cup28-internal.h"
 
 /* Earlier-board SH775x DMAC channel 0.
  * Evidence: dvd.dll 0x01017c4c programs SAR0=b7000000, DAR0=ac008800,

@@ -32,7 +32,6 @@ void cup28_register_write(uint8_t *regs, hwaddr addr, uint64_t value,
 }
 
 #include "cup28-rtc.c.inc"
-#include "cup28-dmac.c.inc"
 #include "cup28-q2.c.inc"
 #include "cup28-most.c.inc"
 #include "cup28-gps.c.inc"
