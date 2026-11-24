@@ -29,10 +29,11 @@ and firmware interface.
   `pkg-config` (QEMU's build dependencies). Linux builds the same way but is
   untested.
 - Python 3.9 or later.
-- Disk space: **CU-P2006** needs about **45 GB free** — the disc ISOs (~9.5 GB)
-  plus the virtual HDD (~22 GB, built once from the discs; the build needs
-  about as much again for temporary part files until it finishes). **CUP28**
-  needs only its map DVD ISO (~8 GB).
+- Disk space: **CU-P2006** needs about **32 GB free** — the disc ISOs (~9.5 GB)
+  plus the virtual HDD (~22 GB, built once from the discs, streamed straight
+  into the image). With `CUP2006_HDD_SET=core` the HDD holds only the map
+  body, region and parcel data in full (~6 GB on disk; see limitations).
+  **CUP28** needs only its map DVD ISO (~8 GB).
 
 ```sh
 make qemu    # download the pinned QEMU release, apply qemu/core-patches/, build (minutes)
@@ -223,6 +224,12 @@ chip, `sensors.csv` for the car's wheel and gyro sensors on the same clock).
   bit 28 after staging a request frame at PA 0x08300000; the same bit also
   enables and completes the drive's interrupt, so only a write with a staged
   frame is a doorbell. The drive answers at once (STUB).
+- **Smaller HDD (`CUP2006_HDD_SET=core`).** Every map file has its installed
+  size, but only `0.2`, `REGION.KWI`, `PARCEL.KWI` and the small files carry
+  all their data; the other large files (disc 2's `0.1`, the address and POI
+  indexes) keep an 8 MiB verified prefix and read as zeros after it. The map
+  draws around Gothenburg; where its data is missing Navi throws
+  (`LOC_MapCtl::MapSizeGet`) and the screen stops responding.
 - **DVD reply address.** The drive's replies are also written to one fixed
   guest virtual address from one firmware build (the driver does not program
   that address in any modelled register), translated through the current
@@ -269,6 +276,7 @@ A scenario directory holds:
 | `--display`, `--audio`, `--qmp` | CUP28 | QEMU display backend, audio backend (`none` to disable), QMP socket |
 | `CUP2006_DISC1` / `CUP2006_DISC2` | CU-P2006 | disc ISO paths |
 | `CUP2006_UNIT` | CU-P2006 | unit state directory (default `build/unit`) |
+| `CUP2006_HDD_SET=core` | CU-P2006 | build and boot the smaller map HDD (`build/hdd/hdd-core.img`) |
 | `CUP2006_SCENARIO` | CU-P2006 | replay a shipped GPS scenario |
 | `CUP2006_CARMARKET=<hex>` | CU-P2006 | market byte from the car (region/marque table above) |
 | `CUP2006_CARMARKER=1` | CU-P2006 | draw an approximation of the 3D car marker (see limitations) |

@@ -123,53 +123,115 @@ def installed_path(name: str) -> str:
     return "Map\\IDX\\" + name if name.upper().endswith(".IDX") else "Map\\" + name
 
 
-def assemble_to(path: Path, target: dict, limit: int | None,
-                discs: list[Path],
-                indexes: list[dict[str, tuple[int, int]]],
-                sparse_full: bool = False) -> tuple[int, int, int]:
-    """Stream (a prefix of) the target's CPYs to `path`, verifying each CPY
-    one at a time; with `sparse_full` the rest is a hole.  Returns
-    (size, cpy_used, data_written)."""
-    total = target["total_size"]
-    want = total if limit is None else min(limit, total)
-    if limit is not None and (limit <= 0 or limit > total):
-        raise MapError("slice %s=%d outside 1..%d" % (target["name"], limit, total))
+def verified_cpys(target: dict, want: int, discs: list[Path],
+                  indexes: list[dict[str, tuple[int, int]]]):
+    """Yield the first `want` bytes of the target, one checksum-verified,
+    decompressed CPY at a time (a CPY is checked before any of it is
+    yielded)."""
     written = 0
-    used = 0
-    with path.open("wb") as out:
-        for cpy in target["files"]:
-            if written >= want:
+    for cpy in target["files"]:
+        if written >= want:
+            break
+        name = cpy["file"]
+        found = None
+        for iso, index in zip(discs, indexes):
+            if name in index:
+                found = (iso, index[name])
                 break
-            name = cpy["file"]
-            found = None
-            for iso, index in zip(discs, indexes):
-                if name in index:
-                    found = (iso, index[name])
-                    break
-            if found is None:
-                raise MapError("CPY %s of %s not found on any disc MAP/"
-                               % (name, target["name"]))
-            iso, (lba, size) = found
-            data = read_cpy(iso, lba, size, name)
-            if len(data) != cpy["size1"] or len(data) != cpy["size2"]:
-                raise MapError("%s: decompressed %d B, manifest says %d/%d"
-                               % (name, len(data), cpy["size1"], cpy["size2"]))
-            got = word_sum(data)
-            if got != cpy["checksum"]:
-                raise MapError("%s: word sum 0x%08x != manifest 0x%08x"
-                               % (name, got, cpy["checksum"]))
-            chunk = data[:want - written]
-            out.write(chunk)
-            written += len(chunk)
-            used += 1
+        if found is None:
+            raise MapError("CPY %s of %s not found on any disc MAP/"
+                           % (name, target["name"]))
+        iso, (lba, size) = found
+        data = read_cpy(iso, lba, size, name)
+        if len(data) != cpy["size1"] or len(data) != cpy["size2"]:
+            raise MapError("%s: decompressed %d B, manifest says %d/%d"
+                           % (name, len(data), cpy["size1"], cpy["size2"]))
+        got = word_sum(data)
+        if got != cpy["checksum"]:
+            raise MapError("%s: word sum 0x%08x != manifest 0x%08x"
+                           % (name, got, cpy["checksum"]))
+        chunk = data[:want - written]
+        written += len(chunk)
+        yield chunk
     if written != want:
         raise MapError("%s: assembled %d B, wanted %d"
                        % (target["name"], written, want))
-    if sparse_full and want < total:
-        out_path = path
-        with out_path.open("r+b") as f:
-            f.truncate(total)
-    return total, used, written
+
+
+class _TargetStat:
+    def __init__(self, size: int) -> None:
+        self.st_size = size
+
+
+class _TargetReader:
+    """File-like read() over verified_cpys(), for SparseImage.copy_at."""
+
+    def __init__(self, source: "TargetSource") -> None:
+        self._source = source
+        self._chunks = verified_cpys(source.target, source.data,
+                                     source.discs, source.indexes)
+        self._buf = b""
+        self._pos = 0
+        self._done = 0
+
+    def read(self, n: int = -1) -> bytes:
+        out = []
+        while n != 0:
+            if self._pos >= len(self._buf):
+                try:
+                    self._buf = next(self._chunks)
+                except StopIteration:
+                    break
+                self._pos = 0
+            take = len(self._buf) - self._pos if n < 0 else min(n, len(self._buf) - self._pos)
+            out.append(self._buf[self._pos:self._pos + take])
+            self._pos += take
+            if n > 0:
+                n -= take
+        data = b"".join(out)
+        self._done += len(data)
+        return data
+
+    def __enter__(self) -> "_TargetReader":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        if exc[0] is None:
+            # Drain the generator so its length check runs.
+            for chunk in self._chunks:
+                self._done += len(chunk)
+            print("  %-12s %12d B  %10d B data  -> %s"
+                  % (self._source.target["name"], self._source.size,
+                     self._done, self._source.dest))
+
+
+class TargetSource:
+    """One manifest target as a make-hdd-image source: its size is the
+    manifest total_size, and its bytes are streamed from the discs' CPYs
+    (each one checksum-verified) straight into the image when the builder
+    copies it.  No per-target part file is written, so the build needs no
+    disk space beyond the image itself.  `data` is how many leading bytes
+    are real data; the rest of the file is a hole (sparse layout)."""
+
+    def __init__(self, target: dict, data: int, dest: str,
+                 discs: list[Path], indexes: list[dict[str, tuple[int, int]]]):
+        self.target = target
+        self.size = target["total_size"]
+        self.data = data
+        self.dest = dest
+        self.discs = discs
+        self.indexes = indexes
+
+    def stat(self) -> _TargetStat:
+        return _TargetStat(self.size)
+
+    def open(self, mode: str = "rb") -> _TargetReader:
+        if mode != "rb":
+            raise ValueError("TargetSource opens read-only")
+        return _TargetReader(self)
+
+    def __str__(self) -> str:
+        return "%s (%s)" % (self.target["name"], self.dest)
 
 
 def main() -> int:
@@ -215,9 +277,6 @@ def main() -> int:
     ap.add_argument("--cluster-kb", type=int, default=None,
                     help="FAT32 cluster size passed to make-hdd-image.py "
                          "(the full layout needs a large one; default 16)")
-    ap.add_argument("--keep-parts", action="store_true",
-                    help="keep the per-target part-<NAME> files next to --out "
-                         "(the 2.4 GB 0.2 part is deleted by default)")
     args = ap.parse_args()
 
     targets = load_manifest(args.manifest)
@@ -260,36 +319,35 @@ def main() -> int:
     if not wanted:
         raise MapError("nothing to install (use --file/--slice/--layout)")
 
-    scratch = args.out.parent
-    scratch.mkdir(parents=True, exist_ok=True)
+    args.out.parent.mkdir(parents=True, exist_ok=True)
     dests = {}
     for spec in args.dest:
         name, sep, path = spec.partition("=")
         if not sep or not path:
             raise MapError("bad --dest %r (expected TARGET=PATH)" % spec)
         dests[name] = path
-    files: list[tuple[Path, str]] = []
-    parts: list[Path] = []
+    files: list[tuple] = []
     for name, limit, sparse in wanted:
         if name not in targets:
             raise MapError("%s is not a manifest target" % name)
         target = targets[name]
-        src = scratch / ("part-" + name)
-        size, used, data = assemble_to(src, target, limit, discs, indexes,
-                                       sparse_full=sparse)
-        parts.append(src)
+        total = target["total_size"]
+        if limit is not None and (limit <= 0 or limit > total) and not sparse:
+            raise MapError("slice %s=%d outside 1..%d" % (name, limit, total))
+        data = total if limit is None else min(limit, total)
         dest = dests.get(name, installed_path(name) if args.layout else name)
-        # Outside --layout the part file is never truncated, so its on-disk
-        # size already is the verified byte count.  Only a sparse layout part
-        # (truncated to the manifest total_size) needs the third item to say
-        # how many leading bytes are real data.
-        entry = ((src, dest, data) if args.layout and data < size
-                 else (src, dest))
+        # Outside --layout a slice is a shorter file; in the sparse layout
+        # the file keeps its manifest size and only `data` bytes are copied.
+        if args.layout or data == total:
+            src = TargetSource(target, data, dest, discs, indexes)
+            entry = (src, dest, data) if data < total else (src, dest)
+        else:
+            sliced = dict(target, total_size=data)
+            src = TargetSource(sliced, data, dest, discs, indexes)
+            entry = (src, dest)
         files.append(entry)
         for prefix in args.prefix:
-            files.append((src, prefix.rstrip("\\") + "\\" + dest))
-        print("  %-12s %12d B  %3d CPY verified  %10d B data  -> %s"
-              % (name, size, used, data, dest))
+            files.append((src, prefix.rstrip("\\") + "\\" + dest) + entry[2:])
     if args.partition == 2:
         make_hdd_image.build(args.out, args.size_mb, args.label, [], fat=args.fat,
                              files2=files, part2_mb=args.part2_mb,
@@ -297,9 +355,6 @@ def main() -> int:
     else:
         make_hdd_image.build(args.out, args.size_mb, args.label, files,
                              fat=args.fat, cluster_kb=args.cluster_kb)
-    if not args.keep_parts:
-        for part in parts:
-            part.unlink(missing_ok=True)
     return 0
 
 

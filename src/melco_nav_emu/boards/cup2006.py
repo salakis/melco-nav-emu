@@ -22,11 +22,24 @@ NK_GLOB = "CUP2006.SHx.*.nb0"
 
 # The virtual HDD: two FAT32 partitions, the map on the second (mounted as
 # hdd2).  It is the complete P2006.SCE install layout assembled from the
-# discs' own MAP/ volumes: a ~22 GB image, and the build needs about as much
-# again for its per-target part files until it finishes.
-HDD = ROOT / "build/hdd/hdd-native-verified.img"
-# Stand-in while the disc ISOs or the install manifest are missing: the same
-# two partitions, empty.  Never used once the real image can be built.
+# discs' own MAP/ volumes: a ~22 GB image, streamed from the discs' verified
+# CPYs straight into the image (no temporary copies).
+#
+# CUP2006_HDD_SET=core builds a smaller image instead (~6 GB of data): the
+# same layout, every target at its installed size, but only the targets in
+# CORE_FULL carry their whole data; the other large ones keep a verified
+# 8 MiB prefix and a hole.  Navi draws the map where 0.2/REGION/PARCEL cover
+# the car's position and throws (`LOC_MapCtl::MapSizeGet inf:1`, then
+# `MpRegionMapImp::Init`, JIT debugger, HMI starved) where its data is
+# missing; searches of the address/POI indexes find nothing past the prefix.
+HDD_SET = os.environ.get("CUP2006_HDD_SET", "full")
+if HDD_SET not in ("full", "core"):
+    raise SystemExit("profile: CUP2006_HDD_SET must be 'full' or 'core', not %r"
+                     % HDD_SET)
+HDD = ROOT / ("build/hdd/hdd-native-verified.img" if HDD_SET == "full"
+              else "build/hdd/hdd-core.img")
+CORE_FULL = ["PAR_MNG.ME", "TMCINFO.ME", "VOICE001.ME", "0.2", "REGION.KWI",
+             "PARCEL.KWI"]
 HDD_EMPTY = ROOT / "build/hdd/hdd-empty.img"
 MANIFEST = ROOT / "images/hdd-manifest.json"
 SCE = ROOT / "images/dvd1/P2006.SCE"
@@ -88,16 +101,87 @@ def _build_map_hdd():
             "--manifest", str(MANIFEST)]
     for name, path in MAP_DEST.items():
         args += ["--dest", "%s=%s" % (name, path)]
-    for target in json.loads(MANIFEST.read_text())["targets"]:
-        args += ["--full", target["name"]]
+    if HDD_SET == "full":
+        full = [t["name"] for t in json.loads(MANIFEST.read_text())["targets"]]
+    else:
+        full = CORE_FULL
+    for name in full:
+        args += ["--full", name]
+    build_atomically(HDD, args)
+
+
+# Where the guest's map manager looks for the installed map identity
+# (`MU_Get_OldMap_Version` reads `HDD2\MAP\ALLDATA.KWI`).
+MAP_PROBE = ("MAP", "ALLDATA.KWI")
+
+
+def hdd_map_problem(path) -> "str | None":
+    """Why the HDD image at `path` holds no installed map, or None if its
+    second (hdd2) partition has a non-empty `MAP\\ALLDATA.KWI`.  A boot
+    without it ends on "Disc unavailable ... Please insert Disc 1" after the
+    disclaimer, whatever disc is in the drive."""
+    import struct
     try:
-        build_atomically(HDD, args)
-    except BaseException:
-        # make-hdd-map.py keeps its per-target part files (up to the size of
-        # the whole map) next to the image until the image is complete.
-        for part in HDD.parent.glob("part-*"):
-            part.unlink(missing_ok=True)
-        raise
+        with open(path, "rb") as f:
+            def read(off, n):
+                f.seek(off)
+                return f.read(n)
+            mbr = read(0, 512)
+            if mbr[510:512] != b"\x55\xaa":
+                return "no MBR"
+            entry = mbr[446 + 16:446 + 32]
+            if entry[4] not in (0x0B, 0x0C):
+                return "no FAT32 second partition (the guest's hdd2)"
+            base = struct.unpack_from("<I", entry, 8)[0] * 512
+            bs = read(base, 512)
+            if bs[0x52:0x5A] != b"FAT32   ":
+                return "the second partition is not FAT32"
+            bps, spc, rsv, nfats = struct.unpack_from("<HBHB", bs, 11)
+            fatsz, root = struct.unpack_from("<I", bs, 36)[0], struct.unpack_from("<I", bs, 44)[0]
+            fat_off = base + rsv * bps
+            data_off = fat_off + nfats * fatsz * bps
+            csize = bps * spc
+
+            def find(cluster, want):
+                for _ in range(4096):            # bounded chain walk
+                    if not 2 <= cluster < 0x0FFFFFF8:
+                        return None
+                    data = read(data_off + (cluster - 2) * csize, csize)
+                    for i in range(0, len(data), 32):
+                        e = data[i:i + 32]
+                        if e[0] == 0:
+                            return None
+                        if e[0] == 0xE5 or e[11] == 0x0F or e[11] & 0x08:
+                            continue
+                        name = e[0:8].decode("latin-1").rstrip()
+                        ext = e[8:11].decode("latin-1").rstrip()
+                        if (name + ("." + ext if ext else "")).upper() == want:
+                            first = (struct.unpack_from("<H", e, 20)[0] << 16 |
+                                     struct.unpack_from("<H", e, 26)[0])
+                            return first, struct.unpack_from("<I", e, 28)[0]
+                    cluster = struct.unpack("<I", read(fat_off + 4 * cluster, 4))[0] & 0x0FFFFFFF
+                return None
+
+            found = find(root, MAP_PROBE[0])
+            if found is None:
+                return "no MAP folder on the map partition (an empty map volume)"
+            found = find(found[0], MAP_PROBE[1])
+            if found is None or found[1] == 0:
+                return "no MAP\\%s on the map partition" % MAP_PROBE[1]
+            head = read(data_off + (found[0] - 2) * csize, min(found[1], csize))
+            if not head.strip(b"\x00"):
+                return "MAP\\%s holds only zeros" % MAP_PROBE[1]
+    except OSError as exc:
+        return "cannot read it: %s" % exc
+    return None
+
+
+def _warn_no_map(path, problem):
+    print("profile: WARNING: the HDD %s (%s) has no installed map: %s.\n"
+          "profile: the guest will stop on \"Disc unavailable ... Please insert "
+          "Disc 1\" after the disclaimer.  Delete it and boot again to build "
+          "the map HDD from the discs." % (path, Path(path).resolve(), problem),
+          file=sys.stderr)
 
 
 def ensure_hdd() -> Path:
@@ -110,6 +194,9 @@ def ensure_hdd() -> Path:
     at the first boot after they appear.
     """
     if HDD.exists():
+        problem = hdd_map_problem(HDD)
+        if problem:
+            _warn_no_map(HDD, problem)
         return HDD
     if not MANIFEST.is_file() and SCE.is_file():
         # `make hdd` not run yet: parse the install manifest from extracted
