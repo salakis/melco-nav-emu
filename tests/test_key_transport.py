@@ -8,8 +8,9 @@ from pathlib import Path
 
 def test_key_transactions_keep_release_and_wait_for_frame_ack(tmp_path):
     machine = Path(__file__).parents[1] / 'machine'
-    source = '\n'.join(p.read_text() for p in [machine / 'cup2006.c'] +
-                         sorted(machine.glob('*.c.inc')))
+    sources = [machine / 'cup2006.c'] + sorted(machine.glob('*.c.inc')) + \
+              sorted(p for p in machine.glob('cup2006-*.c'))
+    source = '\n'.join(p.read_text() for p in sources)
     names = ['cup2006_key_put_frame', 'cup2006_key_guest_tx',
              'cup2006_key_start', 'cup2006_key_pump', 'cup2006_key_enqueue']
     bodies = []
@@ -152,11 +153,11 @@ int main(void) {
 
 
 def test_car_voice_grant_frame_passes_sub1_parser(tmp_path):
-    """The car's f3 81 answer (voice channel, cup2006-subcpu.c.inc) is a
+    """The car's f3 81 answer (voice channel, cup2006-subcpu.c) is a
     well-formed Sub-CPU frame: `02 LEN f3 81 seq kind 01 03 CS`, with a
     correct LEN-seeded checksum through the ETX."""
     machine = Path(__file__).parents[1] / 'machine'
-    source = (machine / 'cup2006-subcpu.c.inc').read_text()
+    source = (machine / 'cup2006-subcpu.c').read_text()
     match = re.search(r'static void cup2006_status_put_frame\([^;]+?\)\n\{', source)
     assert match
     depth, end = 1, match.end()

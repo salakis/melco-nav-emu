@@ -1,12 +1,11 @@
 /*
- * CU-P2006 machine: SCIFs and the SUB1: link: Sub-CPU peer, keys, wheel pulses, power/ACC.
- *
- * Part of machine/cup2006.c, compiled as one translation unit (it is
- * #included there, in this order); not a standalone source file.
- *
- * Copyright (c) 2026 melco-nav-emu contributors
+ * Volvo CU-P2006 board: cup2006-subcpu device.
  * SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright (c) 2026 melco-nav-emu contributors
  */
+
+#include "cup2006-internal.h"
+
 
 /* SCIF page 0xFF92A000: writes are stored so the guest's init reads back;
  * SCFSR overlaid with the TX-ready STUB value; one stderr line per
