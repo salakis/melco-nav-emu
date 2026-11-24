@@ -1,5 +1,10 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later
- * Copyright (c) 2026 melco-nav-emu contributors */
+/*
+ * Volvo VNS CUP28 board: MOST network (chip, vehicle peer, GPS and wheel reports).
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright (c) 2026 melco-nav-emu contributors
+ */
+
+#include "cup28-internal.h"
 
 /* CUP28 MOST control-port host and vehicle peer.
  * Evidence: mst.dll 010395a4 maps 07400000;
