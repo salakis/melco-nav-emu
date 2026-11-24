@@ -13,6 +13,7 @@
 #include "qapi/error.h"
 #include "qemu/error-report.h"
 #include "qemu/host-utils.h"
+#include "qemu/timer.h"
 #include "system/block-backend.h"
 #include "trace.h"
 
@@ -34,6 +35,7 @@ struct MelcoAmdFlash {
     uint16_t id_manufacturer;
     uint16_t id_device;
 
+    int64_t activity_ms;        /* guest time of the last array change */
     Error *migration_blocker;
 };
 
@@ -72,6 +74,7 @@ static void melco_amdflash_write_dev(MelcoAmdFlash *s, hwaddr addr,
         /* The CPU may execute from this array (XIP): drop translated code. */
         memory_region_flush_rom_device(&s->mem, off, len);
         melco_amdflash_update(s, off, len);
+        s->activity_ms = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL);
         switch (op) {
         case MELCO_AMDFLASH_OP_PROGRAM:
             trace_melco_amdflash_program(off, value, size);
@@ -240,6 +243,11 @@ MemoryRegion *melco_amdflash_mmio(MelcoAmdFlash *s)
 uint8_t *melco_amdflash_array(MelcoAmdFlash *s)
 {
     return s->core.data;
+}
+
+int64_t melco_amdflash_activity_ms(MelcoAmdFlash *s)
+{
+    return s->activity_ms;
 }
 
 uint64_t melco_amdflash_read(MelcoAmdFlash *s, hwaddr addr, unsigned size)

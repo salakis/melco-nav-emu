@@ -1285,13 +1285,15 @@ static void cup2006_power_cut_tick(void *opaque)
 {
     Cup2006MachineState *s = opaque;
     int64_t now = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL);
-    int64_t last = MAX(s->power_cut_armed_ms, s->drf_activity_ms);
+    int64_t last = MAX(s->power_cut_armed_ms,
+                       melco_amdflash_activity_ms(s->drf));
 
     if (now - last < CUP2006_POWER_CUT_QUIET_MS) {
         timer_mod(s->power_cut_timer, now + 500);
         return;
     }
-    trace_cup2006_subcpu_power_sub_cpu_cuts(now, s->power_cut_armed_ms, s->drf_activity_ms);
+    trace_cup2006_subcpu_power_sub_cpu_cuts(now, s->power_cut_armed_ms,
+                                            melco_amdflash_activity_ms(s->drf));
     qemu_system_shutdown_request(SHUTDOWN_CAUSE_GUEST_SHUTDOWN);
 }
 

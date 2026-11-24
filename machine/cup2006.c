@@ -25,6 +25,11 @@
 #include <errno.h>
 #include "qemu/error-report.h"
 #include "melco-nvram.h"
+#include "melco-amdflash.h"
+#include "qobject/qdict.h"
+#include "system/block-backend.h"
+#include "system/block-backend-global-state.h"
+#include "block/block.h"
 #include "qemu/log.h"
 #include "qemu/notify.h"
 #include "qemu/timer.h"
@@ -75,23 +80,11 @@ static hwaddr cpu_get_phys_page_debug(CPUState *cpu, vaddr addr)
 #define CUP2006_SRAM_SIZE       0x00010000
 
 
-/* DRF ("DRF1:") flash window, physical 0..0x02000000: ROMD array + AMD command
- * machine (drfimage= loads/saves). STUB: instant erase; STUB: 0xA0 program. */
+/* DRF ("DRF1:") flash window, physical 0..0x02000000: one 32 MiB flash part
+ * (melco-amdflash, 32-bit interleaved pair); drfimage= is its backing file. */
 #define CUP2006_DRF_BASE        0x00000000  /* physical, full window */
 #define CUP2006_DRF_SIZE        0x02000000  /* 32 MiB guest window */
 #define CUP2006_DRF_SECTOR      0x00040000
-#define CUP2006_DRF_UNLOCK1     0xaaaaaaaa
-#define CUP2006_DRF_UNLOCK2     0x55555555
-#define CUP2006_DRF_ERASE_SET   0x80808080
-#define CUP2006_DRF_PROGRAM_SET 0x20202020
-#define CUP2006_DRF_PROGRAM     0xa0a0a0a0
-#define CUP2006_DRF_AUTOSEL     0x90909090
-#define CUP2006_DRF_RESET       0xf0f0f0f0
-#define CUP2006_DRF_ERASE_CMD   0x30303030
-/* 0xB0B0B0B0 is the AMD erase-suspend command and 0x30303030 sector erase
- * (or erase-resume); a real part consumes them without touching the array.
- * STUB: the model's erase is instant, so both are no-ops. */
-#define CUP2006_DRF_ERASE_SUSPEND 0xb0b0b0b0
 
 /* Board register block at 0xff800200 (area-7 alias 0x1f800200), mapped at
  * higher priority than the sh7750 0xff800000 alias so the catch-all sees it;
@@ -742,7 +735,7 @@ struct Cup2006MachineState {
     uint64_t carsig_samples;
     MemoryRegion ata_regs;
     MemoryRegion ata_a7_regs;
-    MemoryRegion drf_regs;
+    MelcoAmdFlash *drf;
     /* PC-card slots 0/1: 4 MiB windows, controller block at +0x3FFFE0. */
     MemoryRegion pcc_mem;
     MemoryRegion pcc_regs_mr[CUP2006_PCC_SLOTS];
@@ -800,7 +793,6 @@ struct Cup2006MachineState {
     /* The Sub-CPU's startup status report: offered once, on the guest's
      * first ENQ (code f9 82, handled by the guest's map-update manager). */
     bool subpeer_report_queued;      /* the startup report has been offered */
-    int64_t drf_activity_ms;         /* guest time of the last flash program/erase */
     QEMUTimer *power_cut_timer;      /* ignition-off: Sub-CPU cuts power when idle */
     int64_t power_cut_armed_ms;
     /* ACC-off notification: F12 makes the Sub-CPU send NET OFF (f1 8a,
@@ -930,19 +922,7 @@ struct Cup2006MachineState {
         bool valid;
         uint32_t base, w, h, stride, fmt;
     } du_reported[CUP2006_DU_PLANES + 1];
-    uint32_t drf_erases;
-    uint8_t *drf_data;
-    uint32_t drf_program_addr;
-    bool drf_program_pending;
-    unsigned drf_cmd_state;      /* AMD command sequence position */
-    bool drf_bypass;             /* unlock-bypass mode */
-    char *drfimage;             /* raw 32 MB save/load of drf_data */
-    int drf_fd;
-    bool drf_image_full_write;  /* image shorter than the array: write all */
-    hwaddr drf_dirty_lo;        /* dirty span [lo, hi), lo >= hi = clean */
-    hwaddr drf_dirty_hi;
-    QEMUTimer *drf_save_timer;
-    Notifier drf_exit;
+    char *drfimage;             /* raw 32 MB backing file of the flash */
     MemoryRegion bkram;          /* bkram=: battery RAM (rev >= 3) */
     MemoryRegion sramsave_mr;    /* sramsave=: battery SRAM over top of RAM */
     char *dvdimage;
@@ -1657,66 +1637,36 @@ static void cup2006_init(MachineState *machine)
     }
 
     {
-        s->drf_erases = 0;
-        s->drf_program_pending = false;
-        s->drf_program_addr = 0;
+        BlockBackend *blk = NULL;
 
         /* The whole 32 MB window is one flash part, mapped ROMD: the XIP
          * kernel's fetches are served from the array, every write reaches the
          * AMD command machine, and the -kernel image is loaded into it. */
-        memory_region_init_rom_device(&s->drf_regs, NULL,
-                                                &cup2006_drf_ops, s,
-                                                "cup2006-drf-flash",
-                                                CUP2006_DRF_SIZE,
-                                                &error_fatal);
-        s->drf_data = memory_region_get_ram_ptr(&s->drf_regs);
-        memset(s->drf_data, 0xff, CUP2006_DRF_SIZE);
-        s->drf_fd = -1;
-        s->drf_dirty_lo = CUP2006_DRF_SIZE;
-        s->drf_dirty_hi = 0;
-        s->drf_image_full_write = false;
         if (s->drfimage && s->drfimage[0]) {
-            struct stat st;
-            ssize_t n;
+            QDict *options;
+            int fd = open(s->drfimage, O_RDWR | O_CREAT, 0644);
 
-            s->drf_fd = open(s->drfimage, O_RDWR | O_CREAT, 0644);
-            if (s->drf_fd < 0) {
+            if (fd < 0) {
                 error_report("cup2006: could not open drfimage '%s': %s",
                              s->drfimage, strerror(errno));
                 exit(1);
             }
-            if (fstat(s->drf_fd, &st) != 0) {
-                error_report("cup2006: could not stat drfimage '%s': %s",
-                             s->drfimage, strerror(errno));
-                exit(1);
-            }
-            if (st.st_size > 0) {
-                hwaddr len = MIN((uint64_t)st.st_size,
-                                 (uint64_t)CUP2006_DRF_SIZE);
-                n = pread(s->drf_fd, s->drf_data, len, 0);
-                if (n != (ssize_t)len) {
-                    error_report("cup2006: could not read drfimage '%s': %s",
-                                 s->drfimage, strerror(errno));
-                    exit(1);
-                }
-                /* A short image leaves the rest erased (0xff); the first
-                 * save rewrites the whole array so later loads are exact. */
-                s->drf_image_full_write = (st.st_size < CUP2006_DRF_SIZE);
-            } else {
-                s->drf_image_full_write = true;
-            }
-            s->drf_exit.notify = cup2006_drf_exit;
-            qemu_add_exit_notifier(&s->drf_exit);
-            s->drf_save_timer =
-                timer_new_ms(QEMU_CLOCK_REALTIME, cup2006_drf_save_timer, s);
-            timer_mod(s->drf_save_timer,
-                      qemu_clock_get_ms(QEMU_CLOCK_REALTIME) +
-                      CUP2006_DRF_SAVE_MS);
-            trace_cup2006_board_drfimage_bytes_on_disk(s->drfimage, (int64_t)st.st_size, s->drf_image_full_write ? "will be initialised"
-                                                : "loaded");
+            close(fd);
+            /* drfimage=<file> becomes the device's block backend, raw, RW. */
+            options = qdict_new();
+            qdict_put_str(options, "driver", "raw");
+            qdict_put_str(options, "file", s->drfimage);
+            blk = blk_new_open(NULL, NULL, options, BDRV_O_RDWR,
+                               &error_fatal);
+            trace_cup2006_board_drfimage_bytes_on_disk(s->drfimage,
+                                                       blk_getlength(blk),
+                                                       "loaded");
         }
+        /* 32-bit interleaved pair: the command byte sits in every lane. */
+        s->drf = melco_amdflash_create(CUP2006_DRF_SIZE, CUP2006_DRF_SECTOR,
+                                       4, 0x0001, 0x227e, blk);
         memory_region_add_subregion_overlap(sysmem, CUP2006_DRF_BASE,
-                                            &s->drf_regs, 1);
+                                            melco_amdflash_mmio(s->drf), 1);
         trace_cup2006_board_drf_flash_window_at(CUP2006_DRF_BASE, CUP2006_DRF_BASE + CUP2006_DRF_SIZE - 1);
     }
 
@@ -2213,10 +2163,9 @@ static void cup2006_init(MachineState *machine)
             g_free(data);
             exit(1);
         }
-        /* The image is the flash part's shipped content: write the array
-         * directly (physical_memory_write would be absorbed by the ROMD
-         * command handler). */
-        memcpy(s->drf_data + load_addr, data, size);
+        /* The image is the flash part's shipped content: write the device's
+         * array directly, without touching the backing file. */
+        memcpy(melco_amdflash_array(s->drf) + load_addr, data, size);
         g_free(data);
 
         trace_cup2006_board_loaded_at_prix64_bytes(machine->kernel_filename, load_addr, (int64_t)size, reset_pc);

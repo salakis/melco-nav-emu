@@ -34,6 +34,9 @@ MemoryRegion *melco_amdflash_mmio(MelcoAmdFlash *s);
 /* The flash array, e.g. to load a kernel image into it before reset. */
 uint8_t *melco_amdflash_array(MelcoAmdFlash *s);
 
+/* Guest time (ms) of the last program/erase, for power-cut logic. */
+int64_t melco_amdflash_activity_ms(MelcoAmdFlash *s);
+
 /* Read/write through the device, e.g. for an alias window. */
 uint64_t melco_amdflash_read(MelcoAmdFlash *s, hwaddr addr, unsigned size);
 void melco_amdflash_write(MelcoAmdFlash *s, hwaddr addr, uint64_t value,
