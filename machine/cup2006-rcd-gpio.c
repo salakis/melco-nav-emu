@@ -1,12 +1,11 @@
 /*
- * CU-P2006 machine: remote-control (RCD) link and GPIO/ADC block.
- *
- * Part of machine/cup2006.c, compiled as one translation unit (it is
- * #included there, in this order); not a standalone source file.
- *
- * Copyright (c) 2026 melco-nav-emu contributors
+ * Volvo CU-P2006 board: cup2006-rcd-gpio device.
  * SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright (c) 2026 melco-nav-emu contributors
  */
+
+#include "cup2006-internal.h"
+
 
 /*
  * RCD device window (256 bytes, shadow-backed so the guest's

@@ -54,6 +54,8 @@
 OBJECT_DECLARE_SIMPLE_TYPE(Cup2006MachineState, CUP2006_MACHINE)
 
 /* Defines used by more than one file. */
+#define CUP2006_GPIO_ACC_BIT     19
+#define CUP2006_PCC_CIS_OFF     0x00100000
 #define CUP2006_DVD5_SIZE        0x00000200
 #define CUP2006_DVD5_WIN_SIZE    0x00001000
 #define CUP2006_DVDST_SIZE       0x00001000

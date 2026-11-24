@@ -85,7 +85,6 @@ hwaddr cpu_get_phys_page_debug(CPUState *cpu, vaddr addr)
  * repurposes the free SH7750 DMAC_DMTE0 slot. */
 #define CUP2006_POWER_INTC_SLOT  22
 #define CUP2006_POWER_INTC_VECT  0x0640
-#define CUP2006_GPIO_ACC_BIT     19
 
 /* Board GPIO block at 0xFF93E000 (alias 0x1F93E000): per port +i*0x1000
  * (dir +0x4, data +0x8, input +0xc). STUB: HDD power-good (port 3 bit 10)
@@ -248,7 +247,6 @@ hwaddr cpu_get_phys_page_debug(CPUState *cpu, vaddr addr)
 /* PC-card slot memory: two 256 KiB host apertures (window A at slot+0,
  * window B at slot+0x100000) are backed by one store, so a write through
  * one window reads back through the other. */
-#define CUP2006_PCC_CIS_OFF     0x00100000
 
 /* First-touch register logs, one entry per distinct register/direction.
  * Sized here so the machine state can hold them. */
@@ -382,7 +380,6 @@ void cup2006_reg32_write(uint8_t *base, hwaddr addr, uint64_t value,
 #include "cup2006-dvd.c.inc"
 #include "cup2006-board.c.inc"
 #include "cup2006-gps.c.inc"
-#include "cup2006-rcd-gpio.c.inc"
 #include "cup2006-du.c.inc"
 #include "cup2006-2dg.c.inc"
 #include "cup2006-soc.c.inc"
