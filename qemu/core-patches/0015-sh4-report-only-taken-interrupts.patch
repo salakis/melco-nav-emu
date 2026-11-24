@@ -1,0 +1,121 @@
+Subject: [PATCH 0015] sh4: report whether an interrupt was taken
+
+# melco-nav-emu core patch.
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (c) 2026 melco-nav-emu contributors
+# Modifies GPL-licensed QEMU sources; applied by scripts/qemu.sh.
+
+superh_cpu_exec_interrupt() reported every CPU_INTERRUPT_HARD request as
+handled, even when superh_cpu_do_interrupt() declined it: SR.BL set with no
+sleep wakeup, or the source's priority not above SR.IMASK.  The request
+stays asserted (the interrupt line is a level, and nothing clears it on a
+decline), so the main loop asked again on every TB exit.  Claiming delivery
+also makes cpu_handle_interrupt() drop last_tb, which stops tb_add_jump()
+from linking the next TB to the last one.
+
+A masked source therefore kept TCG from chaining blocks for as long as it
+stayed pending: every TB was looked up and entered from the main loop
+instead of being linked from its predecessor.
+
+Split the delivery out of the void TCGCPUOps callback into a function that
+reports whether an interrupt was taken, and have both callers use it: the
+exception callback keeps its void signature and ignores the result, while
+superh_cpu_exec_interrupt() returns it, so a declined interrupt leaves
+last_tb alone and TBs link again.  The controller is still queried once per
+delivery (sh_intc_get_pending_vector()).  Exception handling, the SLEEP
+wakeup and the pending level are unchanged, and SR.IMASK is left as the
+SH7751R leaves it on IRQ entry.
+
+The CDJ-2000 emulator identified the masked-IRQ chaining issue; that
+revision's qemu-sh-intc-priority-imask.patch declines the interrupt for the
+same reason:
+https://github.com/cdj2k-revival/cdj2000-emulator/blob/1e705adbc870269cc3af649097f0f2c9708fa689/patches/qemu-sh-intc-priority-imask.patch
+
+--- a/target/sh4/helper.c
++++ b/target/sh4/helper.c
+@@ -57,7 +57,15 @@
+ 
+ #else /* !CONFIG_USER_ONLY */
+ 
+-void superh_cpu_do_interrupt(CPUState *cs)
++/*
++ * Deliver a pending exception or interrupt.
++ *
++ * Returns true only when an interrupt was taken.  An interrupt the hardware
++ * would decline (SR.BL set, or the pending source's priority not above
++ * SR.IMASK) returns false and leaves CPU_INTERRUPT_HARD asserted: the
++ * request is a level that stays pending until the guest unmasks it.
++ */
++static bool superh_cpu_deliver_interrupt(CPUState *cs)
+ {
+     CPUSH4State *env = cpu_env(cs);
+     int do_irq = cpu_test_interrupt(cs, CPU_INTERRUPT_HARD);
+@@ -78,19 +86,21 @@
+                should be loaded with the kernel entry point.
+                qemu_system_reset_request takes care of that.  */
+             qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);
+-            return;
++            return false;
+         }
+         if (do_irq && !env->in_sleep) {
+-            return; /* masked */
++            return false; /* masked */
+         }
+     }
+     env->in_sleep = 0;
+ 
+     if (do_irq) {
++        /* Query the controller once: this is both the mask check and the
++         * vector the handler is entered at. */
+         irq_vector = sh_intc_get_pending_vector(env->intc_handle,
+                                                 (env->sr >> 4) & 0xf);
+         if (irq_vector == -1) {
+-            return; /* masked */
++            return false; /* masked */
+         }
+     }
+ 
+@@ -180,17 +190,23 @@
+             break;
+         }
+         qemu_plugin_vcpu_exception_cb(cs, last_pc);
+-        return;
++        return false;
+     }
+ 
+     if (do_irq) {
+         env->intevt = irq_vector;
+         env->pc = env->vbr + 0x600;
+         qemu_plugin_vcpu_interrupt_cb(cs, last_pc);
+-        return;
++        return true;
+     }
++    return false;
+ }
+ 
++void superh_cpu_do_interrupt(CPUState *cs)
++{
++    (void)superh_cpu_deliver_interrupt(cs);
++}
++
+ static void update_itlb_use(CPUSH4State * env, int itlbnb)
+ {
+     uint32_t or_mask = 0, and_mask = 0xff;
+@@ -802,8 +818,15 @@
+         if (cpu_env(cs)->flags & TB_FLAG_DELAY_SLOT_MASK) {
+             return false;
+         } else {
+-            superh_cpu_do_interrupt(cs);
+-            return true;
++            /*
++             * Report what the delivery actually did.  A declined interrupt
++             * (SR.BL, or priority not above SR.IMASK) is still pending, so
++             * the CPU keeps running and the main loop may link the next TB
++             * to the last one.  Claiming it was handled drops last_tb on
++             * every TB exit, which stops chaining for as long as a masked
++             * source stays pending.
++             */
++            return superh_cpu_deliver_interrupt(cs);
+         }
+     }
+     return false;
