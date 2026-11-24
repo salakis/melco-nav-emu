@@ -79,17 +79,17 @@ int main(void)
     assert(op == MELCO_AMDFLASH_OP_CHIP_ERASE && off == 0 && len == SZ);
     assert(arr[0x100] == 0xff);
 
-    /* autoselect: 90 serves the IDs at the bank base */
+    /* autoselect: 90 serves the IDs at the bank base (0x2aa8 -> bank 0x2000) */
     wr(0x0, 0xf0f0f0f0, 4);
     unlock55();
     wr(0x2aa8, 0x90909090, 4);              /* 90: autoselect */
-    assert(c.autoselect);
-    assert(melco_amdflash_core_read(&c, 0x0, 2) == 0x0001);   /* manufacturer */
-    assert(melco_amdflash_core_read(&c, 0x2, 2) == 0x227e);   /* device */
+    assert(c.autoselect && c.autoselect_bank == 0x2000);
+    assert(melco_amdflash_core_read(&c, 0x2000, 2) == 0x0001);   /* manufacturer */
+    assert(melco_amdflash_core_read(&c, 0x2002, 2) == 0x227e);   /* device */
     /* F0 leaves autoselect; reads serve the array again */
     wr(0x0, 0xf0f0f0f0, 4);
     assert(!c.autoselect);
-    assert(melco_amdflash_core_read(&c, 0x0, 2) == 0xffff);
+    assert(melco_amdflash_core_read(&c, 0x2000, 2) == 0xffff);
 
     /* interleave 2: commands with the byte in two lanes (0x00aa00aa) */
     melco_amdflash_core_init(&c, arr, SZ, SECTOR, 2, 0x0001, 0x227e);
