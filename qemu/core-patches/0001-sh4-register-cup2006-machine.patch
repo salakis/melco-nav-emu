@@ -6,11 +6,12 @@ Subject: [PATCH 0001] sh4: register the cup2006 machine
 # Modifies GPL-licensed QEMU sources; applied by scripts/qemu.sh.
 
 Build hw/sh4/cup2006.c (the Volvo RTI MMM+ / CU-P2006 board, from the
-machine/ directory of melco-nav-emu) into qemu-system-sh4.
+machine/ directory of melco-nav-emu) into qemu-system-sh4, plus the
+shared melco-nvram.c under CONFIG_MELCO_COMMON.
 
 --- a/hw/sh4/Kconfig
 +++ b/hw/sh4/Kconfig
-@@ -13,6 +13,12 @@
+@@ -13,6 +13,17 @@
      select SH7750
      select SH_PCI
  
@@ -19,17 +20,23 @@ machine/ directory of melco-nav-emu) into qemu-system-sh4.
 +    default y
 +    depends on SH4
 +    select SH7750
++    select MELCO_COMMON
++
++config MELCO_COMMON
++    bool
++    depends on SH4
 +
  config SH7750
      bool
      select SH_INTC
 --- a/hw/sh4/meson.build
 +++ b/hw/sh4/meson.build
-@@ -4,5 +4,6 @@
+@@ -4,5 +4,7 @@
    'sh7750_regnames.c',
  ))
  sh4_ss.add(when: 'CONFIG_R2D', if_true: files('r2d.c'))
 +sh4_ss.add(when: 'CONFIG_CUP2006', if_true: files('cup2006.c'))
++sh4_ss.add(when: 'CONFIG_MELCO_COMMON', if_true: files('melco-nvram.c'))
  
  hw_arch += {'sh4': sh4_ss}
 --- a/configs/devices/sh4-softmmu/default.mak

@@ -11,9 +11,9 @@ SH7750R CPU and SH-4 core.
 
 --- a/hw/sh4/Kconfig
 +++ b/hw/sh4/Kconfig
-@@ -19,6 +19,13 @@
+@@ -24,6 +24,14 @@
+     bool
      depends on SH4
-     select SH7750
  
 +config CUP28
 +    bool
@@ -21,17 +21,19 @@ SH7750R CPU and SH-4 core.
 +    depends on SH4
 +    select SH7750
 +    select SERIAL_MM
++    select MELCO_COMMON
 +
  config SH7750
      bool
      select SH_INTC
 --- a/hw/sh4/meson.build
 +++ b/hw/sh4/meson.build
-@@ -5,5 +5,6 @@
+@@ -5,6 +5,7 @@
  ))
  sh4_ss.add(when: 'CONFIG_R2D', if_true: files('r2d.c'))
  sh4_ss.add(when: 'CONFIG_CUP2006', if_true: files('cup2006.c'))
 +sh4_ss.add(when: 'CONFIG_CUP28', if_true: files('cup28.c'))
+ sh4_ss.add(when: 'CONFIG_MELCO_COMMON', if_true: files('melco-nvram.c'))
  
  hw_arch += {'sh4': sh4_ss}
 --- a/configs/devices/sh4-softmmu/default.mak
