@@ -3,7 +3,7 @@
 """Unit checks for the PocketSDR log -> GNSSIQ1 exporter."""
 import struct
 
-from tools.gps.export_replay import measurement_record, nav_record
+from melco_nav_emu.gnss.export_replay import measurement_record, nav_record
 
 
 def _unpack_nav(rec):

@@ -1,5 +1,10 @@
 Subject: [PATCH 0003] sh4: raise an address error for instruction fetch from an odd PC
 
+# melco-nav-emu core patch.
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (c) 2026 melco-nav-emu contributors
+# Modifies GPL-licensed QEMU sources; applied by scripts/qemu.sh.
+
 On SH-4 a jump to an odd address raises an instruction address error
 (exception code 0x0E0, TEA = PC).  WinCE uses this as its system-call
 mechanism: API calls are jumps to odd trap addresses that the kernel's

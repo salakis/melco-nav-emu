@@ -1,11 +1,20 @@
 Subject: [PATCH 0001] sh4: register the cup2006 machine
 
-Build hw/sh4/cup2006.c (the Volvo RTI MMM+ / CU-P2006 board, from the
-machine/ directory of melco-nav-emu) into qemu-system-sh4.
+# melco-nav-emu core patch.
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (c) 2026 melco-nav-emu contributors
+# Modifies GPL-licensed QEMU sources; applied by scripts/qemu.sh.
+
+Build the Volvo RTI MMM+ (CU-P2006) board from the machine/ directory of
+melco-nav-emu into qemu-system-sh4: cup2006.c and its cup2006-*.c devices
+under CONFIG_CUP2006, and the shared back ends it uses (melco-nvram.c,
+melco-amdflash.c with melco-amdflash-core.c, melco-sensors.c with
+melco-sensors-core.c) under CONFIG_MELCO_COMMON.  scripts/qemu.sh links
+machine/*.c into hw/sh4/; this patch only registers them in the build.
 
 --- a/hw/sh4/Kconfig
 +++ b/hw/sh4/Kconfig
-@@ -13,6 +13,12 @@
+@@ -13,6 +13,17 @@
      select SH7750
      select SH_PCI
  
@@ -14,17 +23,23 @@ machine/ directory of melco-nav-emu) into qemu-system-sh4.
 +    default y
 +    depends on SH4
 +    select SH7750
++    select MELCO_COMMON
++
++config MELCO_COMMON
++    bool
++    depends on SH4
 +
  config SH7750
      bool
      select SH_INTC
 --- a/hw/sh4/meson.build
 +++ b/hw/sh4/meson.build
-@@ -4,5 +4,6 @@
+@@ -4,5 +4,7 @@
    'sh7750_regnames.c',
  ))
  sh4_ss.add(when: 'CONFIG_R2D', if_true: files('r2d.c'))
-+sh4_ss.add(when: 'CONFIG_CUP2006', if_true: files('cup2006.c'))
++sh4_ss.add(when: 'CONFIG_CUP2006', if_true: files('cup2006.c', 'cup2006-flash.c', 'cup2006-mbx.c', 'cup2006-carsig.c', 'cup2006-rcd-gpio.c', 'cup2006-soc.c', 'cup2006-board.c', 'cup2006-gps.c', 'cup2006-audio.c', 'cup2006-du.c', 'cup2006-dvd.c', 'cup2006-ata.c', 'cup2006-subcpu.c', 'cup2006-2dg.c'))
++sh4_ss.add(when: 'CONFIG_MELCO_COMMON', if_true: files('melco-nvram.c', 'melco-amdflash.c', 'melco-amdflash-core.c', 'melco-sensors.c', 'melco-sensors-core.c'))
  
  hw_arch += {'sh4': sh4_ss}
 --- a/configs/devices/sh4-softmmu/default.mak

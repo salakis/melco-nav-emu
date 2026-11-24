@@ -1,0 +1,50 @@
+Subject: [PATCH 0014] sh4: advance MMUCR.URC on UTLB misses, not on every fill
+
+# melco-nav-emu core patch.
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (c) 2026 melco-nav-emu contributors
+# Modifies GPL-licensed QEMU sources; applied by scripts/qemu.sh.
+
+find_utlb_entry() runs once per softmmu TLB fill and advanced URC each
+time.  How often QEMU refills a page it has already translated (TLB
+resizes, code-TLB lookups after the execution loop exits) depends on host
+timing, and the guest's LDTLB writes the UTLB entry URC selects, so the
+guest's own TLB contents and TLB-miss exceptions differed between two
+-icount shift=3,sleep=off boots of the same CU-P2006 image.
+
+URC now advances when the UTLB lookup misses, i.e. once per TLB-miss
+exception the guest sees, so a miss handler's LDTLB fills the UTLB round
+robin.  The memory-mapped UTLB array accesses keep their per-access
+increment.  Real hardware advances URC on every UTLB access; neither the
+old nor the new count is cycle-accurate, but this one follows guest events
+only.
+
+--- a/target/sh4/helper.c
++++ b/target/sh4/helper.c
+@@ -316,11 +316,22 @@
+    Return entry, MMU_DTLB_MISS, MMU_DTLB_MULTIPLE */
+ static int find_utlb_entry(CPUSH4State *env, vaddr address, int use_asid)
+ {
+-    /* per utlb access */
+-    increment_urc(env);
++    int e = find_tlb_entry(env, address, env->utlb, UTLB_SIZE, use_asid);
+ 
+-    /* Return entry */
+-    return find_tlb_entry(env, address, env->utlb, UTLB_SIZE, use_asid);
++    /*
++     * The hardware advances URC on every UTLB access.  This function runs
++     * once per softmmu TLB fill, and how often QEMU refills a page it has
++     * already translated depends on its TLB sizing and on where the
++     * execution loop exits, which follow host timing.  Since LDTLB writes
++     * the entry URC selects, counting those refills made the guest's TLB
++     * contents differ between identical icount runs.  Advance URC only
++     * when the lookup misses, i.e. once per TLB-miss exception the guest
++     * sees (melco-nav-emu).
++     */
++    if (e == MMU_DTLB_MISS) {
++        increment_urc(env);
++    }
++    return e;
+ }
+ 
+ /* Match address against MMU

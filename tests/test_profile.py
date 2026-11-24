@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Copyright (c) 2026 melco-nav-emu contributors
-"""tools/profile.py: disc set, NK lookup, GPS scenario, HDD build and the
+"""boards/cup2006.py: disc set, NK lookup, GPS scenario, HDD build and the
 first power-on, without QEMU or disc images."""
 import importlib
 import struct
@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-import tools.profile as profile
+from melco_nav_emu.boards import cup2006 as profile
 
 
 @pytest.fixture
@@ -86,7 +86,7 @@ def test_gps_scenario_only_when_set(fresh_profile, monkeypatch, tmp_path):
 def test_shipped_scenarios_are_complete():
     """Every scenario in the repository has what the machine and its
     provenance need."""
-    root = Path(profile.__file__).resolve().parents[1] / "scenarios"
+    root = Path(profile.__file__).resolve().parents[3] / "scenarios"
     names = sorted(p.name for p in root.iterdir() if p.is_dir())
     assert names
     for name in names:
@@ -194,7 +194,6 @@ def test_first_power_on_timeout_marks_the_unit(fresh_profile, monkeypatch,
 
 def test_first_power_on_stops_once_battery_ram_is_formatted(
         fresh_profile, monkeypatch, tmp_path):
-    from tools import unit as unit_mod
     unit = tmp_path / "unit"
     bkram = unit / "bkram.bin"
     _fake_qemu(monkeypatch, tmp_path,
@@ -205,7 +204,7 @@ def test_first_power_on_stops_once_battery_ram_is_formatted(
                "time.sleep(60)\n" % str(bkram))
     assert profile.first_power_on(unit, timeout=30,
                                   hdd=tmp_path / "x.img") is True
-    assert unit_mod.bkram_dwl_sts(bkram) == [0, 0]
+    assert profile.bkram_dwl_sts(bkram) == [0, 0]
     assert not (unit / ".powered-on").exists()
 
 

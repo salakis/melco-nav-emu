@@ -9,11 +9,23 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # Another disc set (e.g. NA-2450-00): export CUP2006_DISC1/CUP2006_DISC2, or
-# pass --dvd1/--dvd2 (or DVD1/DVD2) — the same variables tools/profile.py reads.
+# pass --dvd1/--dvd2 (or DVD1/DVD2) — the same variables boards/cup2006.py reads.
 DVD1="${DVD1:-${CUP2006_DISC1:-$PROJECT_ROOT/images/dvd/disc1/EU-3350-00_1.ISO}}"
 DVD2="${DVD2:-${CUP2006_DISC2:-$PROJECT_ROOT/images/dvd/disc2/EU-3350-00_2.ISO}}"
 OUT="${OUT:-$PROJECT_ROOT/images}"
 EXTRACT_MAP=0
+
+# Mount point this run created under build/ (if any).  The EXIT trap detaches
+# it, so an interrupted run never leaves the ISO mounted and breaking every
+# later run until it is detached by hand.
+ATTACHED_MNT=""
+cleanup() {
+  if [ -n "$ATTACHED_MNT" ] && [ -d "$ATTACHED_MNT" ]; then
+    detach_mount "$ATTACHED_MNT"
+    ATTACHED_MNT=""
+  fi
+}
+trap cleanup EXIT
 
 usage() {
   cat <<EOF
@@ -60,7 +72,7 @@ sha1_of() {
 }
 
 find_mounted() {
-  local iso="$1"
+  local iso="$1" idx="${2:-}"
   local label
   base="$(basename "$iso" .ISO)"
   for label in "$base" "${base//-/_}"; do
@@ -69,6 +81,14 @@ find_mounted() {
       return 0
     fi
   done
+  # A previous interrupted run may have left our own attach point mounted.
+  if [ -n "$idx" ]; then
+    local own="$PROJECT_ROOT/build/mnt-$idx"
+    if [ -d "$own" ] && mount | grep -q " on $own "; then
+      printf '%s\n' "$own"
+      return 0
+    fi
+  fi
   return 1
 }
 
@@ -139,25 +159,33 @@ for pair in "1:$DVD1" "2:$DVD2"; do
     exit 1
   fi
 
-  if mnt="$(find_mounted "$iso")"; then
+  if mnt="$(find_mounted "$iso" "$idx")"; then
     echo "using existing mount: $mnt"
     extract_from_mount "$mnt" "$dest"
+    # A leftover build/mnt-N mount is ours: detach it after use.
+    case "$mnt" in
+      "$PROJECT_ROOT"/build/*) detach_mount "$mnt" ;;
+    esac
   elif command -v diskutil >/dev/null 2>&1 && [ "$(uname -s)" = "Darwin" ]; then
     mnt="$PROJECT_ROOT/build/mnt-$idx"
     rm -rf "$mnt"
     mkdir -p "$mnt"
     echo "attaching $iso -> $mnt"
     diskutil image attach --readOnly --nobrowse --mountPoint "$mnt" "$iso" >/dev/null
+    ATTACHED_MNT="$mnt"
     extract_from_mount "$mnt" "$dest"
     detach_mount "$mnt"
+    ATTACHED_MNT=""
   elif command -v hdiutil >/dev/null 2>&1; then
     mnt="$PROJECT_ROOT/build/mnt-$idx"
     rm -rf "$mnt"
     mkdir -p "$mnt"
     echo "attaching $iso -> $mnt"
     hdiutil attach -readonly -nobrowse -mountpoint "$mnt" "$iso" >/dev/null
+    ATTACHED_MNT="$mnt"
     extract_from_mount "$mnt" "$dest"
     detach_mount "$mnt"
+    ATTACHED_MNT=""
   else
     if ! extract_with_7z "$iso" "$dest"; then
       echo "error: extracting $iso failed; $dest is incomplete" >&2
@@ -174,5 +202,20 @@ for pair in "1:$DVD1" "2:$DVD2"; do
     fi
   done
 done
+
+# The roots belong to one disc set: boards/cup2006.py reads this back so a
+# boot with another set in the drive stops instead of mixing a set's firmware
+# and map identity into another set's install.
+set_id() {
+  local stem
+  stem="$(basename "$1")"
+  stem="${stem%.*}"
+  printf '%s' "${stem%_[12]}"
+}
+if [ "$(set_id "$DVD1")" = "$(set_id "$DVD2")" ]; then
+  printf '%s\n' "$(set_id "$DVD1")" > "$OUT/.disc-set"
+else
+  printf '%s+%s\n' "$(set_id "$DVD1")" "$(set_id "$DVD2")" > "$OUT/.disc-set"
+fi
 
 echo "done: $OUT/dvd1 and $OUT/dvd2"

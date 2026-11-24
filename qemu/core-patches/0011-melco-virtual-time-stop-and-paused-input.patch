@@ -1,0 +1,270 @@
+Subject: [PATCH 0011] machine: stop at a virtual time; input while so paused
+
+# melco-nav-emu core patch.
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (c) 2026 melco-nav-emu contributors
+# Modifies GPL-licensed QEMU sources; applied by scripts/qemu.sh.
+
+Harness hooks for deterministic headless runs (bootcheck).  Every machine
+gets two QOM properties, used with qom-get/qom-set on /machine:
+
+  x-vclock-ns   QEMU_CLOCK_VIRTUAL now (read-only)
+  x-stop-at-ns  pause the VM (RUN_STATE_PAUSED, QMP STOP event) when the
+                virtual clock reaches this time; negative disarms
+
+Under -icount with sleep=off the pause lands on the same guest instruction
+every run.  The timer callback stops every vCPU itself (in the vCPU thread
+current_cpu is NULL between TBs, so vm_stop() alone leaves it running until
+the main loop pauses it) and inhibits icount's idle clock warp until the VM
+runs again (otherwise, before the main loop sets the run state, the stopped
+vCPU counts as idle, the clock jumps to the next device deadline and device
+timers may run: a host-time race).  Once x-stop-at-ns has been used, a VM paused that way accepts
+input events (send-key, input-send-event) instead of dropping them, so a key
+reaches the board's input handler at an exact virtual time; the key-up of
+send-key's hold-time follows on QEMU_CLOCK_VIRTUAL as upstream.  Nothing
+here is visible to the guest.
+
+--- a/accel/tcg/icount-common.c
++++ b/accel/tcg/icount-common.c
+@@ -289,6 +289,8 @@
+     icount_warp_rt();
+ }
+ 
++bool icount_warp_inhibit;
++
+ void icount_start_warp_timer(void)
+ {
+     int64_t clock;
+@@ -299,8 +301,9 @@
+     /*
+      * Nothing to do if the VM is stopped: QEMU_CLOCK_VIRTUAL timers
+      * do not fire, so computing the deadline does not make sense.
++     * melco-nav-emu: the same while a requested pause is completing.
+      */
+-    if (!runstate_is_running()) {
++    if (!runstate_is_running() || icount_warp_inhibit) {
+         return;
+     }
+ 
+--- a/hw/core/machine.c
++++ b/hw/core/machine.c
+@@ -27,6 +27,10 @@
+ #include "system/system.h"
+ #include "system/reset.h"
+ #include "system/runstate.h"
++#include "qemu/timer.h"
++#include "hw/core/cpu.h"
++#include "exec/icount.h"
++#include "ui/input.h"
+ #include "system/xen.h"
+ #include "system/qtest.h"
+ #include "hw/pci/pci_bridge.h"
+@@ -1054,6 +1058,95 @@
+     return r;
+ }
+ 
++/*
++ * melco-nav-emu: deterministic harness hooks (not guest-visible).
++ * x-vclock-ns reads QEMU_CLOCK_VIRTUAL.  Writing x-stop-at-ns arms a
++ * virtual-clock timer that pauses the VM (RUN_STATE_PAUSED, a QMP STOP
++ * event) when the virtual clock reaches that time; a negative value
++ * disarms it.  With -icount and sleep=off the pause lands on the same
++ * instruction every run, so screendumps and keys sent while paused (input
++ * is accepted then, see ui/input.c) happen at the same guest state.
++ */
++static QEMUTimer *machine_x_stop_timer;
++/* The vm-change-state handler is added once, on first use. */
++static bool machine_x_stop_registered;
++
++static void machine_x_stop_cb(void *opaque)
++{
++    CPUState *cpu;
++
++    /*
++     * Stop every vCPU here, under the BQL.  With icount this callback
++     * usually runs in the vCPU thread between TBs, where current_cpu is
++     * NULL, so vm_stop()'s cpu_stop_current() would leave the vCPU running
++     * until the main loop's pause_all_vcpus().  And until that main-loop
++     * step sets the run state, the stopped vCPU counts as idle, so with
++     * sleep=off icount_start_warp_timer() would jump the clock to the next
++     * device deadline and let the main loop run device timers: both are
++     * host-time races.  The warp stays inhibited until the VM runs again.
++     */
++    icount_warp_inhibit = true;
++    CPU_FOREACH(cpu) {
++        cpu->stop = true;
++        cpu_exit(cpu);
++    }
++    /* Only this pause accepts input; a user's STOP does not (see
++     * ui/input.c: the flag is cleared as soon as the VM runs again). */
++    qemu_input_accept_while_paused = true;
++    vm_stop(RUN_STATE_PAUSED);
++}
++
++static void machine_x_stop_vmstate(void *opaque, bool running,
++                                   RunState state)
++{
++    if (running) {
++        icount_warp_inhibit = false;
++        qemu_input_accept_while_paused = false;
++    }
++}
++
++static void machine_get_x_vclock_ns(Object *obj, Visitor *v, const char *name,
++                                    void *opaque, Error **errp)
++{
++    int64_t ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
++
++    visit_type_int64(v, name, &ns, errp);
++}
++
++static void machine_get_x_stop_at_ns(Object *obj, Visitor *v,
++                                     const char *name, void *opaque,
++                                     Error **errp)
++{
++    int64_t ns = machine_x_stop_timer ?
++                 timer_expire_time_ns(machine_x_stop_timer) : -1;
++
++    visit_type_int64(v, name, &ns, errp);
++}
++
++static void machine_set_x_stop_at_ns(Object *obj, Visitor *v,
++                                     const char *name, void *opaque,
++                                     Error **errp)
++{
++    int64_t ns;
++
++    if (!visit_type_int64(v, name, &ns, errp)) {
++        return;
++    }
++    if (!machine_x_stop_timer) {
++        machine_x_stop_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
++                                            machine_x_stop_cb, NULL);
++    }
++    if (!machine_x_stop_registered) {
++        qemu_add_vm_change_state_handler(machine_x_stop_vmstate, NULL);
++        machine_x_stop_registered = true;
++    }
++    if (ns < 0) {
++        timer_del(machine_x_stop_timer);
++    } else {
++        timer_mod(machine_x_stop_timer, ns);
++    }
++}
++
+ static void machine_class_init(ObjectClass *oc, const void *data)
+ {
+     MachineClass *mc = MACHINE_CLASS(oc);
+@@ -1135,6 +1222,17 @@
+         machine_get_dt_compatible, machine_set_dt_compatible);
+     object_class_property_set_description(oc, "dt-compatible",
+         "Overrides the \"compatible\" property of the dt root node");
++
++    object_class_property_add(oc, "x-vclock-ns", "int",
++        machine_get_x_vclock_ns, NULL, NULL, NULL);
++    object_class_property_set_description(oc, "x-vclock-ns",
++        "Current QEMU_CLOCK_VIRTUAL time in ns (read-only, for harnesses)");
++
++    object_class_property_add(oc, "x-stop-at-ns", "int",
++        machine_get_x_stop_at_ns, machine_set_x_stop_at_ns, NULL, NULL);
++    object_class_property_set_description(oc, "x-stop-at-ns",
++        "Pause the VM when QEMU_CLOCK_VIRTUAL reaches this time (ns); "
++        "negative disarms (for harnesses)");
+ 
+     object_class_property_add_bool(oc, "dump-guest-core",
+         machine_get_dump_guest_core, machine_set_dump_guest_core);
+--- a/include/exec/icount.h
++++ b/include/exec/icount.h
+@@ -70,6 +70,11 @@
+ 
+ /* if the CPUs are idle, start accounting real time to virtual clock. */
+ void icount_start_warp_timer(void);
++/*
++ * melco-nav-emu: while set, icount_start_warp_timer() does not warp
++ * QEMU_CLOCK_VIRTUAL (the machine's x-stop-at-ns pause is in progress).
++ */
++extern bool icount_warp_inhibit;
+ void icount_account_warp_timer(void);
+ void icount_notify_exit(void);
+ 
+--- a/include/ui/input.h
++++ b/include/ui/input.h
+@@ -163,4 +163,7 @@
+ void qemu_input_led_notifier_add(Notifier *n);
+ void qemu_input_led_notifier_remove(Notifier *n);
+ 
++/* melco-nav-emu: see ui/input.c and the machine x-stop-at-ns property. */
++extern bool qemu_input_accept_while_paused;
++
+ #endif /* INPUT_H */
+--- a/stubs/icount.c
++++ b/stubs/icount.c
+@@ -18,6 +18,7 @@
+     abort();
+     return 0;
+ }
++bool icount_warp_inhibit;
+ void icount_start_warp_timer(void)
+ {
+     abort();
+--- a/ui/input.c
++++ b/ui/input.c
+@@ -8,6 +8,22 @@
+ #include "system/replay.h"
+ #include "system/runstate.h"
+ 
++/*
++ * melco-nav-emu: set while the machine's x-stop-at-ns pause is in effect
++ * and cleared when the VM runs again.  A VM paused at a virtual-clock
++ * deadline then accepts input, so a harness can deliver a key at an exact
++ * virtual time; a user's STOP does not set it, so input to a stopped VM is
++ * still dropped as upstream does.
++ */
++bool qemu_input_accept_while_paused;
++
++static bool qemu_input_runstate_ok(void)
++{
++    return runstate_is_running() || runstate_check(RUN_STATE_SUSPENDED) ||
++           (qemu_input_accept_while_paused &&
++            runstate_check(RUN_STATE_PAUSED));
++}
++
+ struct QemuInputHandlerState {
+     DeviceState       *dev;
+     const QemuInputHandler *handler;
+@@ -172,7 +187,7 @@
+         }
+     }
+ 
+-    if (!runstate_is_running() && !runstate_check(RUN_STATE_SUSPENDED)) {
++    if (!qemu_input_runstate_ok()) {
+         error_setg(errp, "VM not running");
+         return;
+     }
+@@ -362,7 +377,7 @@
+         return;
+     }
+ 
+-    if (!runstate_is_running() && !runstate_check(RUN_STATE_SUSPENDED)) {
++    if (!qemu_input_runstate_ok()) {
+         return;
+     }
+ 
+@@ -388,7 +403,7 @@
+ 
+ void qemu_input_event_sync(void)
+ {
+-    if (!runstate_is_running() && !runstate_check(RUN_STATE_SUSPENDED)) {
++    if (!qemu_input_runstate_ok()) {
+         return;
+     }
+ 
+@@ -423,7 +438,7 @@
+ 
+ void qemu_input_event_send_key_delay(uint32_t delay_ms)
+ {
+-    if (!runstate_is_running() && !runstate_check(RUN_STATE_SUSPENDED)) {
++    if (!qemu_input_runstate_ok()) {
+         return;
+     }
+ 

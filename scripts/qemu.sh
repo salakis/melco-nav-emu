@@ -81,12 +81,26 @@ if [ ! -x "$VENV/bin/ninja" ]; then
 fi
 export PATH="$VENV/bin:$PATH"
 
+# The build directory remembers the configured targets: a different
+# QEMU_TARGET needs its own configuration (or its binary is never built).
+TARGET_STAMP="$SRC/build/.melco-targets"
+if [ -f "$SRC/build/build.ninja" ] && \
+   [ "$(cat "$TARGET_STAMP" 2>/dev/null)" != "$TARGET" ]; then
+  echo "qemu.sh: configured for '$(cat "$TARGET_STAMP" 2>/dev/null)', rebuilding for '$TARGET'" >&2
+  rm -rf "$SRC/build"
+fi
 if [ ! -f "$SRC/build/build.ninja" ]; then
   (cd "$SRC" && ./configure --target-list="$TARGET" --disable-werror --disable-docs \
      --disable-gtk --ninja="$VENV/bin/ninja" --python="$VENV/bin/python")
+  printf '%s\n' "$TARGET" > "$TARGET_STAMP"
 fi
-ninja -C "$SRC/build" "$BINARY-unsigned"
-# macOS: the signed copy needs an entitlement step that sometimes fails; the
-# unsigned binary is functionally identical, so fall back to it.
-ninja -C "$SRC/build" "$BINARY" 2>/dev/null || cp "$SRC/build/$BINARY-unsigned" "$SRC/build/$BINARY"
+if [ "$(uname -s)" = "Darwin" ]; then
+  # The "-unsigned" ninja target exists only on macOS (ad-hoc signing).
+  ninja -C "$SRC/build" "$BINARY-unsigned"
+  # The signed copy needs an entitlement step that sometimes fails; the
+  # unsigned binary is functionally identical, so fall back to it.
+  ninja -C "$SRC/build" "$BINARY" 2>/dev/null || cp "$SRC/build/$BINARY-unsigned" "$SRC/build/$BINARY"
+else
+  ninja -C "$SRC/build" "$BINARY"
+fi
 echo "built $SRC/build/$BINARY"

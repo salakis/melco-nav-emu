@@ -14,6 +14,10 @@ images/
   hdd-manifest.json            # parsed P2006.SCE install manifest (make hdd)
 ```
 
+CUP28 (Volvo VNS) needs no extracted files: point the `CUP28_DISC` environment
+variable at your dump of the map DVD ISO (e.g. `Disc A - Western.iso`); the
+launcher carves the firmware from the ISO itself at first boot.
+
 `make extract` reads the ISOs directly (macOS: prefers an already-mounted
 volume or `hdiutil`; Linux: `7z`) and prints a SHA-1 for every extracted
 root file — record them in a local note if you want to verify your dump.

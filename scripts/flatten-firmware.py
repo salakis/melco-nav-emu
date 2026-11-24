@@ -37,6 +37,7 @@ def main() -> int:
 
     print("LOADING.KWI: %d B, %d system(s), %d module(s)"
           % (len(data), len(image.systems), len(image.modules)))
+    failures = 0
     for mod in image.modules:
         body = image.body(mod)
         stem = safe_stem(mod.name, mod.version)
@@ -50,7 +51,14 @@ def main() -> int:
             except ValueError as exc:
                 print("    not B000FF: %s" % exc)
                 continue
-            nb0 = flatten_b000ff(body)
+            try:
+                nb0 = flatten_b000ff(body)
+            except ValueError as exc:
+                # One malformed module must not abort the whole run: the
+                # other modules (incl. the NK) are still carved.
+                print("    B000FF flatten failed: %s" % exc)
+                failures += 1
+                continue
             nb0_path = out / (stem + ".nb0")
             nb0_path.write_bytes(nb0)
             print("    B000FF ImageStart=%#010x ImageLength=%#x exec=%#x "
@@ -58,6 +66,9 @@ def main() -> int:
                   % (container.image_start, container.image_length,
                      container.exec_start, len(container.records),
                      nb0_path.name))
+    if failures:
+        print("%d module(s) failed to flatten" % failures, file=sys.stderr)
+        return 1
     return 0
 
 

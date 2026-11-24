@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Copyright (c) 2026 melco-nav-emu contributors
-"""tools/gps/osm_route.py: carriageway joining and the straightness pick,
+"""gnss/osm_route.py: carriageway joining and the straightness pick,
 on a synthetic OSM extract (no network)."""
-from tools.gps import osm_route
+from melco_nav_emu.gnss import osm_route
 
 
 def _osm(ways, nodes):

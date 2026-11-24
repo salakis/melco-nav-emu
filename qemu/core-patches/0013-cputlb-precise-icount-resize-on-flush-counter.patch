@@ -1,0 +1,103 @@
+Subject: [PATCH 0013] cputlb: under precise icount, size the TLB on a flush counter
+
+# melco-nav-emu core patch.
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (c) 2026 melco-nav-emu contributors
+# Modifies GPL-licensed QEMU sources; applied by scripts/qemu.sh.
+
+The softmmu TLB resizes itself at flush time over a 100 ms window of
+get_clock_realtime().  A resize flushes the TLB, and which pages the guest
+later refills depends on it.  For most targets that is invisible, but
+target/sh4 advances MMUCR.URC on every UTLB lookup it makes for a fill
+(find_utlb_entry -> increment_urc), and the guest's LDTLB writes the UTLB
+entry URC selects.  So with a host-clock window the guest's own TLB
+contents, its TLB misses and everything after them differ between two
+boots of the same image under -icount shift=3,sleep=off (cup2006: first
+divergence in the CU-P2006 kernel's TLB-miss handler, TEA/PTEH accesses,
+about 1.2 M MMIO accesses into the boot).
+
+Under -icount shift=N (ICOUNT_PRECISE) the window clock is a counter that
+advances 1 ms per call, so the window spans 100 flushes and the resize
+decisions follow the guest's flushes only.  shift=auto and no icount are
+unchanged.
+
+--- a/accel/tcg/cputlb.c
++++ b/accel/tcg/cputlb.c
+@@ -40,6 +40,7 @@
+ #include "exec/log.h"
+ #include "exec/helper-proto-common.h"
+ #include "exec/tlb-flags.h"
++#include "exec/icount.h"
+ #include "qemu/atomic.h"
+ #include "qemu/atomic128.h"
+ #include "tb-internal.h"
+@@ -140,6 +141,24 @@
+     return &cpu_tlb_fast(cpu, mmu_idx)->table[tlb_index(cpu, mmu_idx, addr)];
+ }
+ 
++/*
++ * melco-nav-emu: the clock of the TLB resize window.  It decides when an
++ * underused TLB shrinks, and every resize flushes the TLB, so a host clock
++ * makes later TLB fills (and target MMU side effects of a fill, such as
++ * SH4's MMUCR.URC counter that LDTLB uses) depend on host timing.  Under
++ * -icount shift=N (ICOUNT_PRECISE, meant to be deterministic) each call
++ * advances a counter by 1 ms instead, so the window spans 100 flushes.
++ */
++static int64_t tlb_clock_ns(void)
++{
++    static int64_t tlb_pseudo_ns;
++
++    if (icount_enabled() == ICOUNT_PRECISE) {
++        return qatomic_add_fetch(&tlb_pseudo_ns, 1000 * 1000);
++    }
++    return get_clock_realtime();
++}
++
+ static void tlb_window_reset(CPUTLBDesc *desc, int64_t ns,
+                              size_t max_entries)
+ {
+@@ -321,7 +340,7 @@
+ 
+ void tlb_init(CPUState *cpu)
+ {
+-    int64_t now = get_clock_realtime();
++    int64_t now = tlb_clock_ns();
+     int i;
+ 
+     qemu_spin_init(&cpu->neg.tlb.c.lock);
+@@ -371,7 +390,7 @@
+ {
+     MMUIdxMap asked = data.host_int;
+     MMUIdxMap all_dirty, work, to_clean;
+-    int64_t now = get_clock_realtime();
++    int64_t now = tlb_clock_ns();
+ 
+     assert_cpu_is_self(cpu);
+ 
+@@ -510,7 +529,7 @@
+         tlb_debug("forcing full flush midx %d (%016"
+                   VADDR_PRIx "/%016" VADDR_PRIx ")\n",
+                   midx, lp_addr, lp_mask);
+-        tlb_flush_one_mmuidx_locked(cpu, midx, get_clock_realtime());
++        tlb_flush_one_mmuidx_locked(cpu, midx, tlb_clock_ns());
+     } else {
+         if (tlb_flush_entry_locked(tlb_entry(cpu, midx, page), page)) {
+             tlb_n_used_entries_dec(cpu, midx);
+@@ -683,7 +702,7 @@
+         tlb_debug("forcing full flush midx %d ("
+                   "%016" VADDR_PRIx "/%016" VADDR_PRIx "+%016" VADDR_PRIx ")\n",
+                   midx, addr, mask, len);
+-        tlb_flush_one_mmuidx_locked(cpu, midx, get_clock_realtime());
++        tlb_flush_one_mmuidx_locked(cpu, midx, tlb_clock_ns());
+         return;
+     }
+ 
+@@ -696,7 +715,7 @@
+         tlb_debug("forcing full flush midx %d ("
+                   "%016" VADDR_PRIx "/%016" VADDR_PRIx ")\n",
+                   midx, d->large_page_addr, d->large_page_mask);
+-        tlb_flush_one_mmuidx_locked(cpu, midx, get_clock_realtime());
++        tlb_flush_one_mmuidx_locked(cpu, midx, tlb_clock_ns());
+         return;
+     }
+ 

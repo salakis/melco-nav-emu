@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "melco-nav-emu"
 version = "0.0.1"
-description = "QEMU-based emulator for the Volvo RTI MMM+ (CU-P2006) head unit, booting the retail 2017-18 EU DVD"
+description = "QEMU-based emulators for Mitsubishi Electric navigation units: the Volvo RTI MMM+ (CU-P2006) and the Volvo VNS (CUP28), each booting its own retail disc firmware"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "GPL-2.0-or-later" }
@@ -15,6 +15,9 @@ dependencies = []
 [project.optional-dependencies]
 test = ["pytest>=7"]
 
+# The CLI resolves the QEMU binary, images and tools from the source
+# checkout (PROJECT_ROOT), so install editable (`pip install -e .`); a
+# non-editable install cannot find them.
 [project.scripts]
 melco-nav-emu = "melco_nav_emu.cli:main"
 

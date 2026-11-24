@@ -8,13 +8,14 @@ from pathlib import Path
 
 def test_key_transactions_keep_release_and_wait_for_frame_ack(tmp_path):
     machine = Path(__file__).parents[1] / 'machine'
-    source = '\n'.join(p.read_text() for p in [machine / 'cup2006.c'] +
-                         sorted(machine.glob('*.c.inc')))
+    sources = [machine / 'cup2006.c'] + sorted(machine.glob('*.c.inc')) + \
+              sorted(p for p in machine.glob('cup2006-*.c'))
+    source = '\n'.join(p.read_text() for p in sources)
     names = ['cup2006_key_put_frame', 'cup2006_key_guest_tx',
              'cup2006_key_start', 'cup2006_key_pump', 'cup2006_key_enqueue']
     bodies = []
     for name in names:
-        match = re.search(r'static void ' + name + r'\([^;]+?\)\n\{', source)
+        match = re.search(r'(?:static )?void ' + name + r'\([^;]+?\)\n\{', source)
         assert match, name
         depth, end = 1, match.end()
         while depth:
@@ -35,6 +36,13 @@ def test_key_transactions_keep_release_and_wait_for_frame_ack(tmp_path):
 #define QEMU_CLOCK_VIRTUAL 0
 #define cup2006_info(...) ((void)0)
 #define cup2006_dbg(...) ((void)0)
+/* the board logs through trace events now; stub the ones these bodies call */
+#define trace_cup2006_subcpu_keys_guest_acked_key(...) ((void)0)
+#define trace_cup2006_subcpu_keys_peer_enq_x05(...) ((void)0)
+#define trace_cup2006_subcpu_keys_guest_key_raw(...) ((void)0)
+#define trace_cup2006_subcpu_keys_peer_enq_sent(...) ((void)0)
+#define trace_cup2006_subcpu_keys_queue_full_dropped(...) ((void)0)
+#define trace_cup2006_subcpu_subpeer_status_frame_data(...) ((void)0)
 #define PRId64 "lld"
 typedef struct { DECLARATIONS } Cup2006MachineState;
 static int offers, frames, last_key, scheduled, last_status;
@@ -145,11 +153,11 @@ int main(void) {
 
 
 def test_car_voice_grant_frame_passes_sub1_parser(tmp_path):
-    """The car's f3 81 answer (voice channel, cup2006-subcpu.c.inc) is a
+    """The car's f3 81 answer (voice channel, cup2006-subcpu.c) is a
     well-formed Sub-CPU frame: `02 LEN f3 81 seq kind 01 03 CS`, with a
     correct LEN-seeded checksum through the ETX."""
     machine = Path(__file__).parents[1] / 'machine'
-    source = (machine / 'cup2006-subcpu.c.inc').read_text()
+    source = (machine / 'cup2006-subcpu.c').read_text()
     match = re.search(r'static void cup2006_status_put_frame\([^;]+?\)\n\{', source)
     assert match
     depth, end = 1, match.end()
@@ -166,6 +174,13 @@ def test_car_voice_grant_frame_passes_sub1_parser(tmp_path):
 #define PRId64 "lld"
 #define cup2006_info(...) ((void)0)
 #define cup2006_dbg(...) ((void)0)
+/* the board logs through trace events now; stub the ones these bodies call */
+#define trace_cup2006_subcpu_keys_guest_acked_key(...) ((void)0)
+#define trace_cup2006_subcpu_keys_peer_enq_x05(...) ((void)0)
+#define trace_cup2006_subcpu_keys_guest_key_raw(...) ((void)0)
+#define trace_cup2006_subcpu_keys_peer_enq_sent(...) ((void)0)
+#define trace_cup2006_subcpu_keys_queue_full_dropped(...) ((void)0)
+#define trace_cup2006_subcpu_subpeer_status_frame_data(...) ((void)0)
 typedef struct { int car_market; uint8_t car_voice_reply[2]; int key_frames;
                  bool key_last_wheel; } Cup2006MachineState;
 static uint8_t out[32]; static unsigned out_n;
