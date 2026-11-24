@@ -15,7 +15,7 @@
 #include "qemu/host-utils.h"
 #include "qemu/timer.h"
 #include "qemu/notify.h"
-#include "system/runstate.h"
+#include "system/system.h"
 #include "system/block-backend.h"
 #include "trace.h"
 
