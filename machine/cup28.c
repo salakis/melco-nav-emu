@@ -31,7 +31,6 @@ void cup28_register_write(uint8_t *regs, hwaddr addr, uint64_t value,
     }
 }
 
-#include "cup28-q2.c.inc"
 
 static void cup28_reset_cpu(void *opaque)
 {

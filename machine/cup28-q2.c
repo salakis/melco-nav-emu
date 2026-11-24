@@ -1,5 +1,10 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later
- * Copyright (c) 2026 melco-nav-emu contributors */
+/*
+ * Volvo VNS CUP28 board: Q2 display controller.
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright (c) 2026 melco-nav-emu contributors
+ */
+
+#include "cup28-internal.h"
 
 /* HD64413A Q2SD graphics controller. Section numbers refer to its hardware manual. */
 #include "cup28-q2-layout.h"
