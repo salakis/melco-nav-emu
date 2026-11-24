@@ -1,12 +1,11 @@
 /*
- * CU-P2006 machine: SoC/board misc: CPG, RTC, LAN DPRAM, PC-card slots.
- *
- * Part of machine/cup2006.c, compiled as one translation unit (it is
- * #included there, in this order); not a standalone source file.
- *
- * Copyright (c) 2026 melco-nav-emu contributors
+ * Volvo CU-P2006 board: cup2006-soc device.
  * SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright (c) 2026 melco-nav-emu contributors
  */
+
+#include "cup2006-internal.h"
+
 
 static uint64_t cup2006_cpg_read(void *opaque, hwaddr addr, unsigned size)
 {
@@ -148,7 +147,7 @@ const MemoryRegionOps cup2006_rtc_ops = {
 /* STUB: the card's initial attribute-memory content at page 0 offset 0:
  * the CIS tuple chain (DEVICE, CONFIG, FUNCID=ATA, FUNCE, CFTABLE_ENTRY,
  * END) a card answers with before the guest writes it. */
-const uint8_t cup2006_pcc_cis[] = {
+const uint8_t cup2006_pcc_cis[71] = {
     0x01, 0x00, 0x02, 0x00, 0x0d, 0x00, 0x00, 0x00,     /* DEVICE */
     0x1a, 0x00, 0x05, 0x00, 0x01, 0x00, 0x01, 0x00,     /* CONFIG */
     0x00, 0x00, 0x02, 0x00, 0x03, 0x00,

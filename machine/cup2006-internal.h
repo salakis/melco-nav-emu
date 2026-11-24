@@ -801,7 +801,7 @@ extern const QemuInputHandler cup2006_key_handler;
 extern const MemoryRegionOps cup2006_mbx_a7_ops;
 extern const MemoryRegionOps cup2006_mbx_mailbox_ops;
 extern const MemoryRegionOps cup2006_mbx_ops;
-extern const uint8_t cup2006_pcc_cis[];
+extern const uint8_t cup2006_pcc_cis[71];
 extern const MemoryRegionOps cup2006_pcc_cis_ops;
 extern const MemoryRegionOps cup2006_pcc_regs_ops;
 extern const MemoryRegionOps cup2006_rcd_a7_ops;
