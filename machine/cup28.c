@@ -283,16 +283,24 @@ static void cup28_flash_init(Cup28MachineState *s, MemoryRegion *mem,
         /* drfimage=<file> becomes the device's block backend, raw, RW. */
         options = qdict_new();
         qdict_put_str(options, "driver", "raw");
-        blk = blk_new_open(s->drfimage, NULL, options, BDRV_O_RDWR,
+        blk = blk_new_open(s->drfimage, NULL, options,
+                         BDRV_O_RDWR | BDRV_O_RESIZE,
                            &error_fatal);
         have_image = blk_getlength(blk) > 0;
     }
 
     /* 16-bit bus: commands carry the byte in every other lane. */
-    s->drf = melco_amdflash_create(CUP28_FLASH_SIZE, CUP28_FLASH_SECTOR, 2,
+    s->drf = melco_amdflash_create("cup28-flash", CUP28_FLASH_SIZE, CUP28_FLASH_SECTOR, 2,
                                    0x0001, 0x227e, blk);
     memory_region_add_subregion_overlap(mem, CUP28_FLASH_BASE,
                                         melco_amdflash_mmio(s->drf), 1);
+    if (blk && blk_getlength(blk) < CUP28_FLASH_SIZE) {
+        /* A short or empty image leaves the rest of the array erased: grow
+         * the file to the array size and persist the array once. */
+        blk_truncate(blk, CUP28_FLASH_SIZE, true, PREALLOC_MODE_OFF, 0,
+                     &error_fatal);
+        blk_pwrite(blk, 0, CUP28_FLASH_SIZE, melco_amdflash_array(s->drf), 0);
+    }
 
     if (kernel && *kernel) {
         if (!g_file_get_contents(kernel, &data, &length, &error)) {

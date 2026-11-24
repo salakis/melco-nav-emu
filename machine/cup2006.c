@@ -1655,17 +1655,26 @@ static void cup2006_init(MachineState *machine)
             /* drfimage=<file> becomes the device's block backend, raw, RW. */
             options = qdict_new();
             qdict_put_str(options, "driver", "raw");
-            blk = blk_new_open(s->drfimage, NULL, options, BDRV_O_RDWR,
+            blk = blk_new_open(s->drfimage, NULL, options,
+                         BDRV_O_RDWR | BDRV_O_RESIZE,
                                &error_fatal);
             trace_cup2006_board_drfimage_bytes_on_disk(s->drfimage,
                                                        blk_getlength(blk),
                                                        "loaded");
         }
         /* 32-bit interleaved pair: the command byte sits in every lane. */
-        s->drf = melco_amdflash_create(CUP2006_DRF_SIZE, CUP2006_DRF_SECTOR,
+        s->drf = melco_amdflash_create("cup2006-drf-flash", CUP2006_DRF_SIZE, CUP2006_DRF_SECTOR,
                                        4, 0x0001, 0x227e, blk);
         memory_region_add_subregion_overlap(sysmem, CUP2006_DRF_BASE,
                                             melco_amdflash_mmio(s->drf), 1);
+        if (blk && blk_getlength(blk) < CUP2006_DRF_SIZE) {
+            /* A short or empty image leaves the rest of the array erased:
+             * grow the file to the array size and persist the array once. */
+            blk_truncate(blk, CUP2006_DRF_SIZE, true, PREALLOC_MODE_OFF, 0,
+                         &error_fatal);
+            blk_pwrite(blk, 0, CUP2006_DRF_SIZE, melco_amdflash_array(s->drf),
+                       0);
+        }
         trace_cup2006_board_drf_flash_window_at(CUP2006_DRF_BASE, CUP2006_DRF_BASE + CUP2006_DRF_SIZE - 1);
     }
 

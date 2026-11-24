@@ -14,6 +14,8 @@
 #include "qemu/error-report.h"
 #include "qemu/host-utils.h"
 #include "qemu/timer.h"
+#include "qemu/notify.h"
+#include "system/runstate.h"
 #include "system/block-backend.h"
 #include "trace.h"
 
@@ -34,29 +36,54 @@ struct MelcoAmdFlash {
     uint8_t interleave;
     uint16_t id_manufacturer;
     uint16_t id_device;
+    char *name;
 
     int64_t activity_ms;        /* guest time of the last array change */
+    hwaddr dirty_lo, dirty_hi;  /* dirty span [lo, hi), lo >= hi = clean */
+    QEMUTimer *save_timer;
+    Notifier exit_notifier;
     Error *migration_blocker;
 };
 
-/* Persist a changed range to the backing file, widened to 512 bytes. */
-static void melco_amdflash_update(MelcoAmdFlash *s, uint64_t off,
-                                  uint64_t len)
-{
-    uint64_t end;
+#define MELCO_AMDFLASH_SAVE_MS 200
 
-    if (!s->blk) {
+/* Persist the dirty span to the backing file, widened to 512 bytes. */
+static void melco_amdflash_save(MelcoAmdFlash *s)
+{
+    uint64_t off, end;
+    int ret;
+
+    if (!s->blk || s->dirty_lo >= s->dirty_hi) {
         return;
     }
-    end = off + len;
+    off = s->dirty_lo;
+    end = s->dirty_hi;
+    s->dirty_lo = s->size;      /* nothing dirty */
+    s->dirty_hi = 0;
     off = QEMU_ALIGN_DOWN(off, BDRV_SECTOR_SIZE);
     end = QEMU_ALIGN_UP(end, BDRV_SECTOR_SIZE);
     if (end > s->size) {
         end = s->size;
     }
-    if (blk_pwrite(s->blk, off, end - off, s->core.data + off, 0) < 0) {
-        error_report("melco-amdflash: backing file write failed");
+    ret = blk_pwrite(s->blk, off, end - off, s->core.data + off, 0);
+    if (ret < 0) {
+        error_report("melco-amdflash: backing file write failed: %s",
+                     strerror(-ret));
     }
+}
+
+static void melco_amdflash_save_timer_cb(void *opaque)
+{
+    MelcoAmdFlash *s = opaque;
+
+    melco_amdflash_save(s);
+    timer_mod(s->save_timer, qemu_clock_get_ms(QEMU_CLOCK_REALTIME) +
+              MELCO_AMDFLASH_SAVE_MS);
+}
+
+static void melco_amdflash_exit(Notifier *n, void *data)
+{
+    melco_amdflash_save(container_of(n, MelcoAmdFlash, exit_notifier));
 }
 
 static void melco_amdflash_write_dev(MelcoAmdFlash *s, hwaddr addr,
@@ -73,7 +100,12 @@ static void melco_amdflash_write_dev(MelcoAmdFlash *s, hwaddr addr,
                                   &op)) {
         /* The CPU may execute from this array (XIP): drop translated code. */
         memory_region_flush_rom_device(&s->mem, off, len);
-        melco_amdflash_update(s, off, len);
+        if (off < s->dirty_lo) {
+            s->dirty_lo = off;
+        }
+        if (off + len > s->dirty_hi) {
+            s->dirty_hi = off + len;
+        }
         s->activity_ms = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL);
         switch (op) {
         case MELCO_AMDFLASH_OP_PROGRAM:
@@ -89,9 +121,10 @@ static void melco_amdflash_write_dev(MelcoAmdFlash *s, hwaddr addr,
             break;
         }
     }
-    /* In autoselect mode reads must come from the ID block, so ROMD off. */
+    /* Autoselect swaps the ID bytes into the array: drop translated code. */
     if (s->core.autoselect != was_autoselect) {
-        memory_region_rom_device_set_romd(&s->mem, !s->core.autoselect);
+        memory_region_flush_rom_device(&s->mem, s->core.autoselect_bank,
+                                       sizeof(s->core.id_save));
     }
 }
 
@@ -131,7 +164,8 @@ static void melco_amdflash_realize(DeviceState *dev, Error **errp)
     }
 
     memory_region_init_rom_device(&s->mem, OBJECT(dev), &melco_amdflash_ops,
-                                  s, "melco-amdflash", s->size, errp);
+                                  s, s->name ?: "melco-amdflash", s->size,
+                                  errp);
     if (*errp) {
         return;
     }
@@ -165,6 +199,15 @@ static void melco_amdflash_realize(DeviceState *dev, Error **errp)
         }
     }
 
+    s->dirty_lo = s->size;      /* nothing dirty */
+    s->dirty_hi = 0;
+    s->save_timer = timer_new_ms(QEMU_CLOCK_REALTIME,
+                                 melco_amdflash_save_timer_cb, s);
+    timer_mod(s->save_timer, qemu_clock_get_ms(QEMU_CLOCK_REALTIME) +
+              MELCO_AMDFLASH_SAVE_MS);
+    s->exit_notifier.notify = melco_amdflash_exit;
+    qemu_add_exit_notifier(&s->exit_notifier);
+
     sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->mem);
 
     /* The device has no vmstate: snapshots would silently lose its state. */
@@ -179,7 +222,6 @@ static void melco_amdflash_reset(DeviceState *dev)
     MelcoAmdFlash *s = MELCO_AMDFLASH(dev);
 
     melco_amdflash_core_reset(&s->core);
-    memory_region_rom_device_set_romd(&s->mem, true);
 }
 
 static const Property melco_amdflash_properties[] = {
@@ -189,13 +231,23 @@ static const Property melco_amdflash_properties[] = {
     DEFINE_PROP_UINT8("interleave", MelcoAmdFlash, interleave, 1),
     DEFINE_PROP_UINT16("id-manufacturer", MelcoAmdFlash, id_manufacturer, 0),
     DEFINE_PROP_UINT16("id-device", MelcoAmdFlash, id_device, 0),
+    DEFINE_PROP_STRING("name", MelcoAmdFlash, name),
 };
+
+static void melco_amdflash_unrealize(DeviceState *dev)
+{
+    MelcoAmdFlash *s = MELCO_AMDFLASH(dev);
+
+    timer_del(s->save_timer);
+    qemu_remove_exit_notifier(&s->exit_notifier);
+}
 
 static void melco_amdflash_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->realize = melco_amdflash_realize;
+    dc->unrealize = melco_amdflash_unrealize;
     device_class_set_legacy_reset(dc, melco_amdflash_reset);
     device_class_set_props(dc, melco_amdflash_properties);
     set_bit(DEVICE_CATEGORY_STORAGE, dc->categories);
@@ -215,14 +267,15 @@ static void melco_amdflash_register_types(void)
 
 type_init(melco_amdflash_register_types)
 
-MelcoAmdFlash *melco_amdflash_create(uint64_t size, uint32_t sector_len,
-                                     uint8_t interleave,
+MelcoAmdFlash *melco_amdflash_create(const char *name, uint64_t size,
+                                     uint32_t sector_len, uint8_t interleave,
                                      uint16_t id_manufacturer,
                                      uint16_t id_device,
                                      BlockBackend *blk)
 {
     DeviceState *dev = qdev_new(TYPE_MELCO_AMDFLASH);
 
+    qdev_prop_set_string(dev, "name", name);
     if (blk) {
         qdev_prop_set_drive(dev, "drive", blk);
     }

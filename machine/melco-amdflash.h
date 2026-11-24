@@ -19,12 +19,13 @@ DECLARE_INSTANCE_CHECKER(MelcoAmdFlash, MELCO_AMDFLASH,
                          TYPE_MELCO_AMDFLASH)
 
 /*
- * Create and realize one flash device.  The caller maps the returned
- * MMIO region itself (see melco_amdflash_mmio) so the mapping priority
- * stays the machine's choice.  @blk is the optional backing file.
+ * Create and realize one flash device named @name (its MMIO region
+ * name).  The caller maps the returned MMIO region itself (see
+ * melco_amdflash_mmio) so the mapping priority stays the machine's
+ * choice.  @blk is the optional backing file.
  */
-MelcoAmdFlash *melco_amdflash_create(uint64_t size, uint32_t sector_len,
-                                     uint8_t interleave,
+MelcoAmdFlash *melco_amdflash_create(const char *name, uint64_t size,
+                                     uint32_t sector_len, uint8_t interleave,
                                      uint16_t id_manufacturer,
                                      uint16_t id_device,
                                      BlockBackend *blk);

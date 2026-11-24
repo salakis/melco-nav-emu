@@ -45,11 +45,11 @@ typedef struct MelcoAmdFlashCore {
 
     unsigned state;
     bool bypass;                /* unlock bypass entered (AA 55 20) */
-    bool autoselect;            /* 90 seen: reads serve the ID block */
+    bool autoselect;            /* 90 seen: the bank base holds the IDs */
     uint64_t autoselect_bank;
     bool program_pending;       /* A0 seen: next write at program_addr is data */
     uint64_t program_addr;
-    uint8_t id_block[16];       /* autoselect IDs at the bank base */
+    uint8_t id_save[16];        /* array bytes saved while autoselect is on */
 } MelcoAmdFlashCore;
 
 void melco_amdflash_core_init(MelcoAmdFlashCore *c, uint8_t *data,

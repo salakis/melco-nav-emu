@@ -46,15 +46,15 @@ int main(void)
     assert(!wr(0x1000, 0x30303030, 4));
     assert(arr[0x1000] == 0xff && op == MELCO_AMDFLASH_OP_NONE);
 
-    /* unlock + program ANDs the data into the array (A0 itself changes
+    /* unlock + program writes the data into the array (A0 itself changes
      * nothing, so it returns false but arms the address) */
     unlock55();
     assert(!wr(0x1000, 0xa0a0a0a0, 4));     /* A0 arms the address */
     assert(c.program_pending && c.program_addr == 0x1000);
     arr[0x1000] = 0xf0;
-    assert(wr(0x1000, 0x3c3c3c3c, 4));      /* data: old & new */
+    assert(wr(0x1000, 0x3c3c3c3c, 4));      /* data write */
     assert(op == MELCO_AMDFLASH_OP_PROGRAM && off == 0x1000 && len == 4);
-    assert(arr[0x1000] == (0xf0 & 0x3c));
+    assert(arr[0x1000] == 0x3c);
 
     /* sector erase after the full 80 AA 55 sequence fills 0xff */
     arr[0x2000] = 0x00;
