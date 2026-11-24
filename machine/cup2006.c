@@ -1655,8 +1655,7 @@ static void cup2006_init(MachineState *machine)
             /* drfimage=<file> becomes the device's block backend, raw, RW. */
             options = qdict_new();
             qdict_put_str(options, "driver", "raw");
-            qdict_put_str(options, "file", s->drfimage);
-            blk = blk_new_open(NULL, NULL, options, BDRV_O_RDWR,
+            blk = blk_new_open(s->drfimage, NULL, options, BDRV_O_RDWR,
                                &error_fatal);
             trace_cup2006_board_drfimage_bytes_on_disk(s->drfimage,
                                                        blk_getlength(blk),

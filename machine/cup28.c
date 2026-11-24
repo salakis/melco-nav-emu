@@ -283,8 +283,8 @@ static void cup28_flash_init(Cup28MachineState *s, MemoryRegion *mem,
         /* drfimage=<file> becomes the device's block backend, raw, RW. */
         options = qdict_new();
         qdict_put_str(options, "driver", "raw");
-        qdict_put_str(options, "file", s->drfimage);
-        blk = blk_new_open(NULL, NULL, options, BDRV_O_RDWR, &error_fatal);
+        blk = blk_new_open(s->drfimage, NULL, options, BDRV_O_RDWR,
+                           &error_fatal);
         have_image = blk_getlength(blk) > 0;
     }
 
