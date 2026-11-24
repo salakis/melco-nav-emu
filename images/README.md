@@ -31,8 +31,12 @@ Everything the emulator generates lives under `build/` (also gitignored):
 
 ```
 build/
-  hdd/        the virtual HDD (FAT32, two partitions, map on the second);
-              hdd-empty.img stands in while the discs are not extracted
+  hdd/<disc-set>/
+              the virtual HDD (FAT32, two partitions, map on the second):
+              hdd-native-verified.img, or hdd-core.img with
+              CUP2006_HDD_SET=core; hdd-empty.img stands in while the discs
+              are not extracted. One directory per disc set, e.g.
+              hdd/EU-3350-00/
   unit/       the unit's persistent state: flash, battery RAM/SRAM, EEPROM
   gps/<name>/ a GPS scenario, used with CUP2006_SCENARIO=<name>:
               drive.replay (radio recording) + sensors.csv
@@ -46,4 +50,4 @@ build/
 | `dvd2/*` | root of `EU-3350-00_2.ISO` |
 | `firmware/*` | `LOADING.KWI` module table (B000FF containers) |
 | `hdd-manifest.json` | `P2006.SCE` install script |
-| `build/hdd/*.img` | the discs' own `MAP/` volumes, assembled and checksum-checked |
+| `build/hdd/<disc-set>/*.img` | the discs' own `MAP/` volumes, assembled and checksum-checked |

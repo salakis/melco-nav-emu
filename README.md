@@ -176,7 +176,8 @@ The disclaimer is accepted with ENTER, as in the car:
 `build/unit/` holds one head unit's non-volatile memory: its flash, battery
 RAM, battery SRAM and EEPROM. It persists across boots like the car's, so
 settings and the last position survive. The map itself is on the virtual HDD
-in `build/hdd/`, shared by all units.
+in `build/hdd/<disc-set>/` (e.g. `build/hdd/EU-3350-00/`), shared by all
+units.
 
 - `rm -rf build/unit` gives a **new unit with the map installed**: the next
   `make boot` powers it on once to format its memory, then marks the map
@@ -292,7 +293,7 @@ A scenario directory holds:
 | `--display`, `--audio`, `--qmp` | CUP28 | QEMU display backend, audio backend (`none` to disable), QMP socket |
 | `CUP2006_DISC1` / `CUP2006_DISC2` | CU-P2006 | disc ISO paths |
 | `CUP2006_UNIT` | CU-P2006 | unit state directory (default `build/unit`) |
-| `CUP2006_HDD_SET=core` | CU-P2006 | build and boot the smaller map HDD (`build/hdd/hdd-core.img`) |
+| `CUP2006_HDD_SET=core` | CU-P2006 | build and boot the smaller map HDD (`build/hdd/<disc-set>/hdd-core.img`) |
 | `CUP2006_SCENARIO` | CU-P2006 | replay a shipped GPS scenario |
 | `CUP2006_CARMARKET=<hex>` | CU-P2006 | market byte from the car (region/marque table above) |
 | `CUP2006_CARMARKER=1` | CU-P2006 | draw an approximation of the 3D car marker (see limitations) |
