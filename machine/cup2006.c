@@ -24,6 +24,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include "qemu/error-report.h"
+#include "melco-nvram.h"
 #include "qemu/log.h"
 #include "qemu/notify.h"
 #include "qemu/timer.h"

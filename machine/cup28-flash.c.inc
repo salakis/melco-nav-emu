@@ -50,39 +50,13 @@ static void cup28_bksram_init(Cup28MachineState *s)
     const char *name = "cup28-backup-sram";
     const char *path = s->sramsave;
     const size_t size = MiB;
+    struct stat st;
 
-    if (path && *path) {
-#ifdef CONFIG_POSIX
-        struct stat st;
-        int fd = open(path, O_RDWR | O_CREAT, 0600);
-
-        if (fd < 0 || flock(fd, LOCK_EX | LOCK_NB) < 0 ||
-            fstat(fd, &st) < 0) {
-            error_report("cup28: cannot open backup SRAM '%s': %s",
-                         path, strerror(errno));
-            exit(1);
-        }
-        if (st.st_size != 0 && st.st_size != size) {
-            error_report("cup28: backup SRAM '%s' must be 1 MiB", path);
-            exit(1);
-        }
-        /* STUB: a shared file stands in for battery-backed SRAM. Writes
-         * survive closing the window without relying on a launcher dump. */
-        memory_region_init_ram_from_fd(&s->p28_bksram, NULL, name, size,
-                                       RAM_SHARED, fd, 0, &error_fatal);
-        if (!st.st_size) {
-            memset(memory_region_get_ram_ptr(&s->p28_bksram), 0xff, size);
-        }
+    melco_nvram_init(&s->p28_bksram, OBJECT(s), name,
+                     (path && *path) ? path : NULL, size, 0xff);
+    if (path && *path && stat(path, &st) == 0) {
         trace_cup28_flash_backup_sram(st.st_size ? "restored from" : "initialized in", path);
-        return;
-#else
-        error_report("cup28: file-backed SRAM requires a POSIX host");
-        exit(1);
-#endif
     }
-
-    memory_region_init_ram(&s->p28_bksram, NULL, name, size, &error_fatal);
-    memset(memory_region_get_ram_ptr(&s->p28_bksram), 0xff, size);
 }
 
 static void cup28_flash_save_timer(void *opaque)
