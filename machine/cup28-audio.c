@@ -1,5 +1,10 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later
- * Copyright (c) 2026 melco-nav-emu contributors */
+/*
+ * Volvo VNS CUP28 board: audio DMA and playback.
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright (c) 2026 melco-nav-emu contributors
+ */
+
+#include "cup28-internal.h"
 
 /* The second bank is the capture path (wavedev.dll 00ff1648). */
 #define CUP28_PCM_RATE 44100
