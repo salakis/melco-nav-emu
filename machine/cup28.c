@@ -12,6 +12,11 @@
 #endif
 #include "qemu/audio.h"
 #include "melco-nvram.h"
+#include "melco-amdflash.h"
+#include "qobject/qdict.h"
+#include "system/block-backend.h"
+#include "system/block-backend-global-state.h"
+#include "block/block.h"
 #include "qemu/bswap.h"
 #include "qemu/error-report.h"
 #include "qemu/log.h"
@@ -56,27 +61,18 @@ struct Cup28MachineState {
     bool powered;
     char *dvdimage, *drfimage, *sramsave, *gpstrack;
     Error *migration_blocker;
-    MemoryRegion ram, drf_regs, drf_alias_regs;
+    MemoryRegion ram, drf_alias_regs;
+    MelcoAmdFlash *drf;
     MemoryRegion selftest_regs, rtc_regs, rtc_a7_regs;
     QemuConsole *disp_con;
 
-    int dvd_fd, drf_fd;
+    int dvd_fd;
     uint64_t dvd_size;
     uint8_t dvd5_rx[32];
     unsigned dvd5_rx_len, dvd5_rx_pos;
     bool dvd5_spinup_pending, dvd5_disc_ready;
     struct intc_source *dvd5_intc_src, *dvd5_intc_src2;
 
-    uint8_t *drf_data;
-    hwaddr drf_dirty_lo, drf_dirty_hi;
-    bool drf_image_full_write, drf_autoselect, drf_program_pending;
-    unsigned drf_cmd_state;      /* AMD unlock-sequence state */
-    hwaddr drf_autoselect_bank;
-    uint32_t drf_program_addr;
-    uint8_t drf_id_save[16];
-    uint32_t drf_erases, drf_programs, drf_other_writes;
-    QEMUTimer *drf_save_timer;
-    Notifier drf_exit;
 
     int64_t rtc_base_s, rtc_base_ms;
     uint16_t rtc_set[6];
@@ -271,48 +267,32 @@ static void cup28_flash_init(Cup28MachineState *s, MemoryRegion *mem,
     g_autofree char *data = NULL;
     g_autoptr(GError) error = NULL;
     gsize length;
+    BlockBackend *blk = NULL;
+    bool have_image = false;
 
-    memory_region_init_rom_device(&s->drf_regs, NULL, &cup28_flash_ops,
-                                  s, "cup28-flash", CUP28_FLASH_SIZE,
-                                  &error_fatal);
-    s->drf_data = memory_region_get_ram_ptr(&s->drf_regs);
-    memset(s->drf_data, 0xff, CUP28_FLASH_SIZE);
-    s->drf_fd = -1;
-    s->drf_dirty_lo = CUP28_FLASH_SIZE;   /* nothing dirty */
-    s->drf_dirty_hi = 0;
     if (s->drfimage && *s->drfimage) {
-        struct stat st;
+        QDict *options;
+        int fd = open(s->drfimage, O_RDWR | O_CREAT | O_BINARY, 0600);
 
-        s->drf_fd = open(s->drfimage, O_RDWR | O_CREAT | O_BINARY, 0600);
-        if (s->drf_fd < 0 || fstat(s->drf_fd, &st) < 0) {
+        if (fd < 0) {
             error_report("cup28: cannot open flash '%s': %s", s->drfimage,
                          strerror(errno));
             exit(1);
         }
-#ifdef CONFIG_POSIX
-        if (flock(s->drf_fd, LOCK_EX | LOCK_NB) < 0) {
-            error_report("cup28: cannot lock flash '%s': %s", s->drfimage,
-                         strerror(errno));
-            exit(1);
-        }
-#endif
-        if (st.st_size != 0 && st.st_size != CUP28_FLASH_SIZE) {
-            error_report("cup28: flash '%s' must be 32 MiB", s->drfimage);
-            exit(1);
-        }
-        if (st.st_size &&
-            pread(s->drf_fd, s->drf_data, st.st_size, 0) != st.st_size) {
-            error_report("cup28: cannot read flash '%s'", s->drfimage);
-            exit(1);
-        }
-        s->drf_image_full_write = !st.st_size;
-        s->drf_exit.notify = cup28_flash_exit;
-        qemu_add_exit_notifier(&s->drf_exit);
-        s->drf_save_timer = timer_new_ms(QEMU_CLOCK_REALTIME,
-                                        cup28_flash_save_timer, s);
-        timer_mod(s->drf_save_timer, qemu_clock_get_ms(QEMU_CLOCK_REALTIME) +
-                  CUP28_FLASH_SAVE_MS);
+        close(fd);
+        /* drfimage=<file> becomes the device's block backend, raw, RW. */
+        options = qdict_new();
+        qdict_put_str(options, "driver", "raw");
+        qdict_put_str(options, "file", s->drfimage);
+        blk = blk_new_open(NULL, NULL, options, BDRV_O_RDWR, &error_fatal);
+        have_image = blk_getlength(blk) > 0;
     }
+
+    /* 16-bit bus: commands carry the byte in every other lane. */
+    s->drf = melco_amdflash_create(CUP28_FLASH_SIZE, CUP28_FLASH_SECTOR, 2,
+                                   0x0001, 0x227e, blk);
+    memory_region_add_subregion_overlap(mem, CUP28_FLASH_BASE,
+                                        melco_amdflash_mmio(s->drf), 1);
 
     if (kernel && *kernel) {
         if (!g_file_get_contents(kernel, &data, &length, &error)) {
@@ -323,13 +303,13 @@ static void cup28_flash_init(Cup28MachineState *s, MemoryRegion *mem,
             error_report("cup28: firmware does not fit in flash");
             exit(1);
         }
-        memcpy(s->drf_data + CUP28_FIRMWARE_OFFSET, data, length);
-    } else if (s->drf_fd < 0 || s->drf_image_full_write) {
+        memcpy(melco_amdflash_array(s->drf) + CUP28_FIRMWARE_OFFSET,
+               data, length);
+    } else if (!have_image) {
         error_report("cup28: supply a bootable flash image or -kernel");
         exit(1);
     }
 
-    memory_region_add_subregion_overlap(mem, CUP28_FLASH_BASE, &s->drf_regs, 1);
     /* Flash A25 is unwired. The loader uses the upper alias to program it. */
     memory_region_init_io(&s->drf_alias_regs, OBJECT(s), &cup28_drf_alias_ops,
                           s, "cup28-flash-alias", CUP28_FLASH_SIZE);
