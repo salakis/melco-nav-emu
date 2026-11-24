@@ -113,6 +113,12 @@ def test_default_boot_goes_through_the_cup2006_board(tmp_path, monkeypatch):
     monkeypatch.setattr(cup2006, "QEMU", qemu)
     monkeypatch.setattr(cup2006, "first_power_on", lambda *a, **k: None)
     monkeypatch.setattr(cup2006, "unit_hdd", lambda u: tmp_path / "hdd.img")
+    # No firmware in this repository: the NK is only stringified into
+    # -kernel when the command line is built (_argv), never opened, and
+    # os.execv is replaced below so QEMU never reads it.  find_nk()'s own
+    # failure modes are test_profile's business.
+    nk = tmp_path / "firmware" / "CUP2006.SHx.ORG_v00002308.nb0"
+    monkeypatch.setattr(cup2006, "find_nk", lambda *a, **k: nk)
     command = []
     monkeypatch.setattr(cli.os, "execv", lambda path, argv: command.extend(argv))
     unit = tmp_path / "cup2006"
@@ -125,6 +131,7 @@ def test_default_boot_goes_through_the_cup2006_board(tmp_path, monkeypatch):
     assert "hddimage=%s" % (tmp_path / "hdd.img") in machine
     assert command[command.index("-display") + 1] == "none"
     assert command[command.index("-serial") + 1] == "stdio"
+    assert command[command.index("-kernel") + 1] == str(nk)
 
 
 def test_boot_cup2006_unit_env_fallbacks(tmp_path, monkeypatch):
@@ -134,6 +141,8 @@ def test_boot_cup2006_unit_env_fallbacks(tmp_path, monkeypatch):
     monkeypatch.setattr(cup2006, "QEMU", qemu)
     monkeypatch.setattr(cup2006, "first_power_on", lambda *a, **k: None)
     monkeypatch.setattr(cup2006, "unit_hdd", lambda u: tmp_path / "hdd.img")
+    monkeypatch.setattr(cup2006, "find_nk",
+                        lambda *a, **k: tmp_path / "firmware" / "nk.nb0")
     command = []
     monkeypatch.setattr(cli.os, "execv", lambda path, argv: command.extend(argv))
     # MELCO_UNIT wins over CUP2006_UNIT.
