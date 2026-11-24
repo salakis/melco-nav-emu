@@ -43,9 +43,9 @@ does not model it.
 - Python 3.9 or later.
 - Disk space: **CU-P2006** needs about **32 GB free** — the disc ISOs (~9.5 GB)
   plus the virtual HDD (~22 GB, built once from the discs, streamed straight
-  into the image). With `CUP2006_HDD_SET=core` the HDD holds only the map
-  body, region and parcel data in full (~6 GB on disk; see limitations).
-  **CUP28** needs only its map DVD ISO (~8 GB).
+  into the image). With `CUP2006_HDD_SET=core` the HDD is ~6 GB and carries
+  region and parcel data in full, but detailed map data only around
+  Gothenburg. **CUP28** needs only its map DVD ISO (~8 GB).
 
 ```sh
 make qemu    # download the pinned QEMU release, apply qemu/core-patches/, build (minutes)
@@ -66,12 +66,26 @@ CUP28_DISC="/path/to/Disc A - Western.iso" make boot MODEL=cup28
 .venv/bin/python -m melco_nav_emu.cli boot --model cup28 --disc "/path/to/Disc A - Western.iso"
 ```
 
-Use Enter to accept the disclaimer, Escape to go back, and the arrow keys to
-navigate. The macOS window is resizable and uses CoreAudio. On a new unit the
+The macOS window is resizable and uses CoreAudio. On a new unit the
 firmware can initially look for European files; let it finish its first
 power-on, close the window, then run the same command again. The guest saves
 the North American market setting supplied over MOST and then uses miles and
 US English guidance.
+
+### Keys
+
+Use Enter to accept the disclaimer, Escape to go back, and the arrow keys to
+navigate:
+
+| key | unit |
+|---|---|
+| arrows | joystick |
+| ENTER | ENTER |
+| ESC | BACK |
+
+That is the unit's whole face: no disc-eject or ignition keys are modelled
+for this unit, so there are none to press (close the window to end the
+session).
 
 ### Unit state
 
@@ -107,8 +121,7 @@ CSV format and what each column drives, and
   Francisco. With `--track`, positions come from the CSV, but the satellite
   constellation is a fixed pattern and the receiver clock is made up (STUB): it
   starts at a fixed 2026-11-22 12:00:00 and advances monotonically with virtual
-  time. `drive.replay` (the CU-P2006 radio-chip format) is not used by this
-  unit.
+  time.
 - **DVD replies** are shaped to pass the guest driver's checks rather than
   taken from a drive protocol (STUB).
 - **Audio**: playback DMA is chunked through the host audio backend; KIWI voice
@@ -120,10 +133,7 @@ CSV format and what each column drives, and
 - **No snapshots or reset**: the board devices have no saved state, so `savevm`
   and migration are refused; a reset powers the unit off (start it again).
 - Tested with the North America Western disc set only; other disc editions and
-  the M-loader update process are out of scope. The same disc's `LOADING.KWI`
-  also lists `CUP2001E.*` modules, but the unit boots the `CUP28.SHx.ORG`
-  image — that is the board this machine models (see
-  [docs/board-cup28.md](docs/board-cup28.md)).
+  the M-loader update process are out of scope.
 
 ## CU-P2006 (Volvo RTI MMM+)
 
@@ -146,9 +156,11 @@ make boot                  # first run builds the virtual HDD (~22 GB, once)
 panel scales to fit); the unit's serial console prints on the terminal. The
 first boot of a new unit is preceded by one short headless power-on (about
 30 s, log in `build/unit/first-power-on.log`), in which the guest formats its
-battery RAM. The disclaimer is accepted with ENTER, as in the car.
+battery RAM.
 
-Keys:
+### Keys
+
+The disclaimer is accepted with ENTER, as in the car:
 
 | key | unit |
 |---|---|
@@ -223,35 +235,21 @@ chip, `sensors.csv` for the car's wheel and gyro sensors on the same clock).
   not emulated, so the 3D view has no marker. `CUP2006_CARMARKER=1` draws an
   approximation from the guest's geometry with the emulator's own colours and
   shading. The 2D view's marker is the guest's own drawing.
+- **Display.** The DU model implements the commands the tested firmware uses,
+  plus one behaviour the SH7785 manual does not describe but the guest depends
+  on: it raises INTEVT 0x780 with every DIER enable clear (STUB departure).
+- **DVD drive.** Only the commands the driver actually issues are modelled
+  (sector reads, media-status polls, the command echo and the post-"Loading
+  start" queries); the drive answers at once, its reply bytes are values
+  chosen to pass the driver's own checks, and replies land at the one fixed
+  guest address the driver reads them from (STUBs, each documented at its
+  site in `machine/cup2006-dvd.c`).
 - **No snapshots or reset.** The board devices have no saved state, so
   `savevm` and migration are refused; a reset powers the unit off (start it
   again).
 - **Shared disk.** The guest's writes to the shared HDD image are kept in
   memory for the session only (a unit with its own `build/unit/hdd.img`
   writes to that file). The DVD drive serves ISO images read-only.
-- **DU interrupt.** The DU model raises INTEVT 0x780 with every DIER enable
-  clear, which the SH7785 manual does not describe; the guest relies on the
-  line, so it is kept as-is (STUB departure, noted here deliberately).
-- **DVD doorbell.** The driver rings the drive by writing INTC2 0xFFE00044
-  bit 28 after staging a request frame at PA 0x08300000; the same bit also
-  enables and completes the drive's interrupt, so only a write with a staged
-  frame is a doorbell. The drive answers at once (STUB).
-- **Smaller HDD (`CUP2006_HDD_SET=core`).** Every map file has its installed
-  size, but only `0.2`, `REGION.KWI`, `PARCEL.KWI` and the small files carry
-  all their data; the other large files (disc 2's `0.1`, the address and POI
-  indexes) keep an 8 MiB verified prefix and read as zeros after it. The map
-  draws around Gothenburg; where its data is missing Navi throws
-  (`LOC_MapCtl::MapSizeGet`) and the screen stops responding.
-- **DVD command set.** Only the commands the driver actually issues are
-  modelled (B8 93 sector reads, the media-status polls B8 80/81/01/04, B8 3A
-  command echo and the two post-"Loading start" queries); the reply bytes
-  follow the driver's own checks, so several are STUB values chosen to pass
-  them (documented at each site in `machine/cup2006-dvd.c`). A real drive
-  answers a much larger set.
-- **DVD reply address.** The drive's replies are also written to one fixed
-  guest virtual address from one firmware build (the driver does not program
-  that address in any modelled register), translated through the current
-  process's MMU. STUB, kept because the product driver reads the reply there.
 - Untested: Linux hosts, big-endian hosts, disc sets other than `EU-3350-00`.
 
 ## GPS drive scenarios
@@ -315,7 +313,9 @@ qemu/upstream.json  the pinned QEMU release
 qemu/core-patches/  machine registration, small SH-4 changes, and
                     deterministic shift=N icount runs (0011-0014,
                     used by bootcheck)
-docs/               board model notes (docs/board-cup28.md)
+docs/               board and device model notes: docs/board-cup28.md,
+                    docs/sensors.md, docs/flash-notes.md (the NOR flash
+                    command sets both boards implement)
 scenarios/          two 3-minute GPS drives (OpenStreetMap-based, ODbL 1.0:
                     see scenarios/LICENSE)
 screenshots/        UI screenshots (plain PNGs, no metadata chunks)
