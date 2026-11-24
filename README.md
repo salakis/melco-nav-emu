@@ -84,8 +84,9 @@ cumulative MOST wheel count and the analog gyro from one virtual clock; set
 `gps=0` in a row to simulate loss of fix while wheel pulses and gyro continue.
 The replay ends at rest with an invalid fix. Without `--track` the receiver is
 stationary with a fixed fix in San Francisco. See "GPS drive scenarios" below
-for where the scenarios come from, and [docs/board-cup28.md](docs/board-cup28.md)
-for the receiver model.
+for where the scenarios come from, [docs/sensors.md](docs/sensors.md) for the
+CSV format and what each column drives, and
+[docs/board-cup28.md](docs/board-cup28.md) for the receiver model.
 
 ### Limitations and STUBs
 
@@ -245,7 +246,8 @@ A scenario directory holds:
   records of 0x30 bytes (same indexing). The guest's own GPS library computes
   every fix from these.
 - `sensors.csv`: the car's sensors on the same clock, one row per sample:
-  `t_s,lat_deg,lon_deg,alt_m,speed_kmh,heading_deg,yaw_dps,gps`. **CUP28**
+  `t_s,lat_deg,lon_deg,alt_m,speed_kmh,heading_deg,yaw_dps,gps` (format and
+  per-board meaning: [docs/sensors.md](docs/sensors.md)). **CUP28**
   consumes this file directly (`--track scenarios/<name>/sensors.csv`): speed
   drives the MOST wheel count, yaw the gyro, and lat/lon the position over
   MOST. **CU-P2006** consumes the wheel and yaw columns (`gpstrack=`); its
