@@ -8,9 +8,10 @@
     python -m melco_nav_emu.bootcheck compare LABEL_A LABEL_B
 
 `run` boots one board headless from a fresh unit directory, takes QMP
-screendumps and sends keys at fixed times, counts MMIO accesses per region
-via -trace, and writes build/bootcheck/<label>/result.json.  `compare` checks
-that two runs of the same board reached the same screens and did a comparable
+screendumps and sends keys at fixed guest virtual times (the VM is paused
+at each one through core patch 0011's x-stop-at-ns), counts MMIO accesses
+per region via -trace, and writes build/bootcheck/<label>/result.json.
+`compare` checks that two runs of the same board reached the same screens and did a comparable
 amount of MMIO traffic (see compare()).
 """
 from __future__ import annotations
@@ -41,14 +42,17 @@ TEMPLATE = OUT_BASE / "template"
 # screendumps; cup28 logs console milestones (below).
 DEFAULTS = {
     "cup2006": {
-        # Disclaimer by 120 s; RIGHT then ENTER; the 3D map is up by 265 s
-        # and unchanged through 340 s, so the 280 and 295 s shots are the
-        # map screen.  Its 3D camera is not always the same: 4 of 5 runs gave
-        # one frame, 1 a slightly shifted one (keys are sent on the host
-        # clock), so a compare can flag those two shots on an unchanged tree.
-        "seconds": 300,
-        "shots": ["120", "240", "280", "295"],
-        "keys": ["240:right", "250:ret"],
+        # Times are guest virtual seconds (QEMU_CLOCK_VIRTUAL; see
+        # _run_until), which under shift=3,sleep=off run ~3x faster than
+        # the host clock.  The disclaimer is up by 20 s; RIGHT at 60 s
+        # selects "Advanced mode" (the 70 s shot is taken before ENTER at
+        # 70 s); the 3D map is up by 80 s and unchanged through 250 s, so
+        # the 110 and 125 s shots are the map screen.  Keys and shots land
+        # on the same guest instruction every run, so an unchanged tree
+        # gives the same hashes.
+        "seconds": 130,
+        "shots": ["30", "70", "110", "125"],
+        "keys": ["60:right", "70:ret"],
         "disc": None,
         "scenario": None,
         # With the launcher's shift=auto,sleep=on the serial-poll MMIO count
@@ -62,7 +66,10 @@ DEFAULTS = {
         "keys": [],
         "disc": None,      # falls back to $CUP28_DISC
         "scenario": None,
-        "icount": None,    # the launcher's shift=auto,sleep=on is stable here
+        # The launcher's shift=auto,sleep=on is stable here; its virtual
+        # clock follows the host clock, so these times are close to host
+        # seconds.
+        "icount": None,
     },
 }
 
@@ -169,6 +176,85 @@ def _count_mmio(stream, counts: Dict[str, int], tail: List[str]) -> None:
                 counts[m.group(1)] = counts.get(m.group(1), 0) + 1
 
 
+def _schedule(shots: List[str], keys: List[str]) -> List[Tuple[float, str, str]]:
+    """Shots and keys sorted by time; at one time, shots come first."""
+    events = ([(float(t), "shot", t) for t in shots] +
+              [(float(t), "key", k) for t, k in
+               (k.split(":", 1) for k in keys)])
+    events.sort(key=lambda e: (e[0], e[1] != "shot"))
+    return events
+
+
+def _vclock_ns(qmp: QMPClient) -> int:
+    return int(qmp.execute("qom-get", {"path": "/machine",
+                                       "property": "x-vclock-ns"}))
+
+
+def _run_until(qmp: QMPClient, proc: subprocess.Popen, when: float,
+               wall_limit: float) -> int:
+    """Let the guest run until QEMU_CLOCK_VIRTUAL reaches `when` seconds,
+    then leave it paused there; returns the virtual time (ns).
+
+    Core patch 0011's x-stop-at-ns timer pauses the VM on the virtual
+    clock, so under -icount ...,sleep=off the pause is the same guest
+    instruction on every run, unlike a host-clock sleep."""
+    target = int(round(when * 1e9))
+    now = _vclock_ns(qmp)
+    paused = qmp.execute("query-status")["status"] == "paused"
+    if paused and now >= target:
+        # Already paused at or just past it (an earlier event at this time).
+        return now
+    if now > target:
+        raise SystemExit("bootcheck: virtual clock is at %.3f s, past the "
+                         "event at %.3f s" % (now / 1e9, when))
+    # `paused` was read before arming: a running VM may pause at the new
+    # target before a later query, and must not be resumed then.
+    qmp.execute("qom-set", {"path": "/machine", "property": "x-stop-at-ns",
+                            "value": target})
+    if paused:
+        qmp.execute("cont")
+    while True:
+        if proc.poll() is not None:
+            raise SystemExit("bootcheck: QEMU exited with code %d during "
+                             "the run" % proc.returncode)
+        if qmp.execute("query-status")["status"] == "paused":
+            return _vclock_ns(qmp)
+        if time.monotonic() > wall_limit:
+            raise SystemExit("bootcheck: virtual time %.3f s not reached "
+                             "(at %.3f s) before the host-time limit"
+                             % (when, _vclock_ns(qmp) / 1e9))
+        time.sleep(0.05)
+
+
+def _run_events(qmp: QMPClient, proc: subprocess.Popen,
+                events: List[Tuple[float, str, str]],
+                seconds: float) -> List[dict]:
+    """Take shots and send keys at their guest virtual times, then run to
+    `seconds` and leave the VM paused; returns a log of what ran when."""
+    # Generous: the guest's virtual time runs at roughly host speed or
+    # faster with the boards' icount settings.
+    start = time.monotonic()
+    wall_limit = start + max(600.0, 4 * seconds)
+    log = []
+    for when, kind, value in events:
+        vns = _run_until(qmp, proc, when, wall_limit)
+        if kind == "shot":
+            qmp.screendump("shot-%s.ppm" % value)
+        else:
+            qmp.execute("send-key", {
+                "keys": [{"type": "qcode", "data": value}],
+                "hold-time": 100,
+            })
+        log.append({"time": when, "kind": kind, "value": value,
+                    "vclock_ns": vns,
+                    "host_s": round(time.monotonic() - start, 3)})
+    vns = _run_until(qmp, proc, seconds, wall_limit)
+    log.append({"time": seconds, "kind": "end", "value": None,
+                "vclock_ns": vns,
+                "host_s": round(time.monotonic() - start, 3)})
+    return log
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     if _qemu_running():
         raise SystemExit("bootcheck: a qemu-system process is already running "
@@ -176,8 +262,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     board = args.board
     defaults = DEFAULTS[board]
     seconds = args.seconds if args.seconds is not None else defaults["seconds"]
-    shots = args.shots.split(",") if args.shots else list(defaults["shots"])
-    keys = args.keys.split(",") if args.keys else list(defaults["keys"])
+    # --keys "" means no keys; empty items (a trailing comma) are ignored.
+    shots = ([t for t in args.shots.split(",") if t] if args.shots
+             else list(defaults["shots"]))
+    keys = ([k for k in args.keys.split(",") if k] if args.keys is not None
+            else list(defaults["keys"]))
     disc = args.disc or defaults["disc"]
     scenario = args.scenario or defaults["scenario"]
     icount = args.icount if args.icount is not None else defaults["icount"]
@@ -212,6 +301,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                               args=(proc.stderr, counts, tail), daemon=True)
     reader.start()
     start = time.monotonic()
+    vlog: List[dict] = []
     try:
         sock = outdir / "qmp.sock"
         qmp: Optional[QMPClient] = None
@@ -231,27 +321,8 @@ def cmd_run(args: argparse.Namespace) -> int:
                                      "within 120 s; stderr tail:\n%s"
                                      % "\n".join(tail[-20:]))
                 time.sleep(0.2)
-        events = ([(float(t), "shot", t) for t in shots] +
-                  [(float(t), "key", k) for t, k in
-                   (k.split(":", 1) for k in keys)])
-        events.sort(key=lambda e: e[0])
-        for when, kind, value in events:
-            delay = when - (time.monotonic() - start)
-            if delay > 0:
-                time.sleep(delay)
-            if proc.poll() is not None:
-                raise SystemExit("bootcheck: QEMU exited with code %d during "
-                                 "the run" % proc.returncode)
-            if kind == "shot":
-                qmp.screendump("shot-%s.ppm" % value)
-            else:
-                qmp.execute("send-key", {
-                    "keys": [{"type": "qcode", "data": value}],
-                    "hold-time": 100,
-                })
-        delay = seconds - (time.monotonic() - start)
-        if delay > 0:
-            time.sleep(delay)
+        events = _schedule(shots, keys)
+        vlog = _run_events(qmp, proc, events, seconds)
         qmp.quit()
         qmp.close()
         try:
@@ -287,6 +358,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         "hdd": str(media["hdd"]) if media.get("hdd") else None,
         "hdd_problem": hdd_problem,
         "seconds": seconds,
+        "clock": "virtual",
+        "events": vlog,
         "screenshots": screenshots,
         "mmio_counts": "mmio-counts.json",
         "milestones": milestones,

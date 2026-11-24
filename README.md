@@ -294,7 +294,9 @@ arguments go after `--`, e.g.
 machine/            board models (cup2006.c and cup28.c) and device sources,
                     symlinked into QEMU's hw/sh4/
 qemu/upstream.json  the pinned QEMU release
-qemu/core-patches/  machine registration and small SH-4 changes
+qemu/core-patches/  machine registration, small SH-4 changes, and
+                    deterministic shift=N icount runs (0011-0014,
+                    used by bootcheck)
 docs/               board model notes (docs/board-cup28.md)
 scenarios/          two 3-minute GPS drives (OpenStreetMap-based, ODbL 1.0:
                     see scenarios/LICENSE)

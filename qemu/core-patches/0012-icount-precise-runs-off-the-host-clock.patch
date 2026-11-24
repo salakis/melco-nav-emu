@@ -1,0 +1,129 @@
+Subject: [PATCH 0012] icount: keep shift=N,sleep=off runs off the host clock
+
+# melco-nav-emu core patch.
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (c) 2026 melco-nav-emu contributors
+# Modifies GPL-licensed QEMU sources; applied by scripts/qemu.sh.
+
+-icount shift=N,sleep=off is meant to give a deterministic execution time:
+when every vCPU is idle, QEMU_CLOCK_VIRTUAL jumps to the next timer
+deadline.  The jump is made by the main loop, each time it wakes
+(main_loop_wait -> icount_start_warp_timer), and all_cpu_threads_idle() is
+already true once the guest halts (SH4 SLEEP sets cpu->halted), before the
+vCPU thread has left tcg_cpu_exec() and run icount_process_data().  A main
+loop that wakes in that window (QMP traffic, a host-clock timer, file I/O)
+reads a clock that misses the slice's instructions, so the warp lands past
+the deadline by a host-timing-dependent amount and device timers fire at
+different guest instructions from run to run.  Measured on cup2006: two
+identical 30 s boots differed in their MMIO counts by up to 3%.
+
+With sleep=off the warp now happens only while the vCPU thread waits in
+rr_wait_io_event() (icount_vcpu_parked, set and cleared under the BQL),
+when every executed instruction is accounted.  The thread wakes the main
+loop as it parks, so the warp is not delayed.  sleep=on is unchanged.
+
+Also, with shift=N (ICOUNT_PRECISE) a vCPU slice no longer ends at the next
+QEMU_CLOCK_REALTIME deadline: that ended slices at host-dependent
+instructions, and the code-TLB lookups after an exit can reach the guest
+(SH4 ITLB misses; see also patches 0013 and 0014).  shift=auto keeps it.
+
+--- a/accel/tcg/icount-common.c
++++ b/accel/tcg/icount-common.c
+@@ -290,6 +290,7 @@
+ }
+ 
+ bool icount_warp_inhibit;
++bool icount_vcpu_parked;
+ 
+ void icount_start_warp_timer(void)
+ {
+@@ -354,6 +355,19 @@
+          * QEMU_CLOCK_VIRTUAL.
+          */
+         if (!icount_sleep) {
++            /*
++             * melco-nav-emu: the main loop calls this whenever it wakes.
++             * A vCPU that has just halted (e.g. SH4 SLEEP) already counts
++             * as idle while its thread has not yet run
++             * icount_process_data(), so the clock read here would miss
++             * that slice's instructions and the warp would overshoot the
++             * deadline by a host-timing-dependent amount.  Warp only while
++             * the vCPU thread is parked; rr_wait_io_event() wakes the main
++             * loop when it parks.
++             */
++            if (!icount_vcpu_parked) {
++                return;
++            }
+             /*
+              * We never let VCPUs sleep in no sleep icount mode.
+              * If there is a pending QEMU_CLOCK_VIRTUAL timer we just advance
+--- a/accel/tcg/tcg-accel-ops-icount.c
++++ b/accel/tcg/tcg-accel-ops-icount.c
+@@ -45,10 +45,18 @@
+          */
+         deadline = qemu_clock_deadline_ns_all(QEMU_CLOCK_VIRTUAL,
+                                               QEMU_TIMER_ATTR_ALL);
+-        /* Check realtime timers, because they help with input processing */
+-        deadline = qemu_soonest_timeout(deadline,
+-                qemu_clock_deadline_ns_all(QEMU_CLOCK_REALTIME,
+-                                           QEMU_TIMER_ATTR_ALL));
++        /*
++         * Check realtime timers, because they help with input processing.
++         * melco-nav-emu: not with shift=N (ICOUNT_PRECISE): a host-clock
++         * deadline ends the slice at a host-dependent instruction, and the
++         * code-TLB lookups after such an exit can reach the guest (SH4
++         * ITLB misses).  The main loop runs realtime timers on its own.
++         */
++        if (icount_enabled() != ICOUNT_PRECISE) {
++            deadline = qemu_soonest_timeout(deadline,
++                    qemu_clock_deadline_ns_all(QEMU_CLOCK_REALTIME,
++                                               QEMU_TIMER_ATTR_ALL));
++        }
+ 
+         /*
+          * Maintain prior (possibly buggy) behaviour where if no deadline
+--- a/accel/tcg/tcg-accel-ops-rr.c
++++ b/accel/tcg/tcg-accel-ops-rr.c
+@@ -112,7 +112,17 @@
+ 
+     while (all_cpu_threads_idle()) {
+         rr_stop_kick_timer();
++        if (icount_enabled()) {
++            /*
++             * melco-nav-emu: parked, with every instruction accounted; the
++             * main loop may warp the clock now (icount_start_warp_timer).
++             * Set under the BQL, which qemu_cond_wait_bql() releases.
++             */
++            icount_vcpu_parked = true;
++            qemu_notify_event();
++        }
+         qemu_cond_wait_bql(first_cpu->halt_cond);
++        icount_vcpu_parked = false;
+     }
+ 
+     rr_start_kick_timer();
+--- a/include/exec/icount.h
++++ b/include/exec/icount.h
+@@ -75,6 +75,12 @@
+  * QEMU_CLOCK_VIRTUAL (the machine's x-stop-at-ns pause is in progress).
+  */
+ extern bool icount_warp_inhibit;
++/*
++ * melco-nav-emu: true while the round-robin vCPU thread waits in
++ * rr_wait_io_event(), i.e. after icount_process_data() has accounted every
++ * executed instruction.  With sleep=off the clock is warped only then.
++ */
++extern bool icount_vcpu_parked;
+ void icount_account_warp_timer(void);
+ void icount_notify_exit(void);
+ 
+--- a/stubs/icount.c
++++ b/stubs/icount.c
+@@ -19,6 +19,7 @@
+     return 0;
+ }
+ bool icount_warp_inhibit;
++bool icount_vcpu_parked;
+ void icount_start_warp_timer(void)
+ {
+     abort();
