@@ -944,10 +944,7 @@ struct Cup2006MachineState {
     QEMUTimer *drf_save_timer;
     Notifier drf_exit;
     MemoryRegion bkram;          /* bkram=: battery RAM (rev >= 3) */
-    char *sramsave_path;         /* sramsave=: battery SRAM file */
-    uint8_t *sramsave_last;      /* content of the last battery SRAM save */
-    Notifier sramsave_exit;
-    QEMUTimer *sramsave_timer;
+    MemoryRegion sramsave_mr;    /* sramsave=: battery SRAM over top of RAM */
     char *dvdimage;
     char *dvdnext;           /* discs inserted in turn after an eject */
     int dvd_fd;
@@ -1723,7 +1720,7 @@ static void cup2006_init(MachineState *machine)
         trace_cup2006_board_drf_flash_window_at(CUP2006_DRF_BASE, CUP2006_DRF_BASE + CUP2006_DRF_SIZE - 1);
     }
 
-    cup2006_sramsave_init(s);
+    cup2006_sramsave_init(s, sysmem);
 
     /*
      * Decode gaps: lowest priority, so real devices and RAM win. Any

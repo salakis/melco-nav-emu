@@ -71,41 +71,6 @@ static void cup2006_drf_save(Cup2006MachineState *s)
 #define CUP2006_BKRAM_BASE 0x19400000
 #define CUP2006_BKRAM_SIZE 0x00100000
 
-/*
- * Save a battery-backed memory to its file: skipped when unchanged since the
- * last save, written to <file>.tmp and renamed over <file> only when complete,
- * so an interrupted save never leaves a short file.
- */
-static void cup2006_battery_save(const char *path, const void *data,
-                                 size_t len, uint8_t **last)
-{
-    g_autofree char *tmp = NULL;
-    FILE *f;
-    bool ok;
-
-    if (*last && !memcmp(*last, data, len)) {
-        return;
-    }
-    tmp = g_strdup_printf("%s.tmp", path);
-    f = fopen(tmp, "wb");
-    if (!f) {
-        warn_report("cup2006: cannot write %s: %s", tmp, strerror(errno));
-        return;
-    }
-    ok = fwrite(data, 1, len, f) == len;
-    ok = (fflush(f) == 0) && ok;
-    ok = (fclose(f) == 0) && ok;
-    if (!ok || rename(tmp, path) != 0) {
-        warn_report("cup2006: saving %s failed: %s", path, strerror(errno));
-        unlink(tmp);
-        return;
-    }
-    if (!*last) {
-        *last = g_malloc(len);
-    }
-    memcpy(*last, data, len);
-}
-
 static void cup2006_bkram_init(Cup2006MachineState *s, MemoryRegion *sysmem)
 {
     const char *path = s->bkram_file;
@@ -127,59 +92,23 @@ static void cup2006_bkram_init(Cup2006MachineState *s, MemoryRegion *sysmem)
 
 /*
  * sramsave=<file>: keep the battery-backed SRAM (top 64 KiB of DRAM,
- * physical 0x0FFF0000, see CUP2006_SRAM_SIZE) across runs.
+ * physical 0x0FFF0000, see CUP2006_SRAM_SIZE) across runs: a 64 KiB
+ * NVRAM region mapped over that part of RAM.
  * STUB: the file stands in for the backup battery.
  */
-static void cup2006_sramsave_save(Cup2006MachineState *s)
-{
-    uint8_t *buf = g_malloc(CUP2006_SRAM_SIZE);
-    hwaddr base = memory_region_size(&s->ram) - CUP2006_SRAM_SIZE;
-
-    physical_memory_read(base, buf, CUP2006_SRAM_SIZE);
-    cup2006_battery_save(s->sramsave_path, buf, CUP2006_SRAM_SIZE,
-                         &s->sramsave_last);
-    g_free(buf);
-}
-
-static void cup2006_sramsave_exit(Notifier *n, void *data)
-{
-    cup2006_sramsave_save(container_of(n, Cup2006MachineState,
-                                       sramsave_exit));
-}
-
-static void cup2006_sramsave_timer_cb(void *opaque)
-{
-    Cup2006MachineState *s = opaque;
-
-    cup2006_sramsave_save(s);
-    timer_mod(s->sramsave_timer, qemu_clock_get_ms(QEMU_CLOCK_REALTIME) + 2000);
-}
-
-static void cup2006_sramsave_init(Cup2006MachineState *s)
+static void cup2006_sramsave_init(Cup2006MachineState *s, MemoryRegion *sysmem)
 {
     const char *path = s->sramsave;
-    hwaddr base;
-    gchar *data = NULL;
-    gsize size = 0;
+    hwaddr base = memory_region_size(&s->ram) - CUP2006_SRAM_SIZE;
+    struct stat st;
 
-    if (!path || !path[0]) {
-        return;
+    melco_nvram_init(&s->sramsave_mr, OBJECT(s), "cup2006.sramsave",
+                     (path && *path) ? path : NULL, CUP2006_SRAM_SIZE, 0x00);
+    memory_region_add_subregion_overlap(sysmem, base, &s->sramsave_mr, 1);
+    if (path && *path) {
+        size_t n = (stat(path, &st) == 0) ? st.st_size : 0;
+        trace_cup2006_flash_battery_sram_prix64_kib(base, path, n);
     }
-    s->sramsave_path = g_strdup(path);
-    base = memory_region_size(&s->ram) - CUP2006_SRAM_SIZE;
-    if (g_file_get_contents(path, &data, &size, NULL) &&
-        size == CUP2006_SRAM_SIZE) {
-        physical_memory_write(base, data, size);
-    } else {
-        size = 0;
-    }
-    g_free(data);
-    s->sramsave_exit.notify = cup2006_sramsave_exit;
-    qemu_add_exit_notifier(&s->sramsave_exit);
-    s->sramsave_timer = timer_new_ms(QEMU_CLOCK_REALTIME,
-                                     cup2006_sramsave_timer_cb, s);
-    timer_mod(s->sramsave_timer, qemu_clock_get_ms(QEMU_CLOCK_REALTIME) + 2000);
-    trace_cup2006_flash_battery_sram_prix64_kib(base, path, (size_t)size);
 }
 
 static void cup2006_drf_save_timer(void *opaque)
