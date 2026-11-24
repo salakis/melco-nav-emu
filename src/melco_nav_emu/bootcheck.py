@@ -41,8 +41,13 @@ TEMPLATE = OUT_BASE / "template"
 # screendumps; cup28 logs console milestones (below).
 DEFAULTS = {
     "cup2006": {
-        "seconds": 260,
-        "shots": ["120", "180", "240", "255"],
+        # Disclaimer by 120 s; RIGHT then ENTER; the 3D map is up by 265 s
+        # and unchanged through 340 s, so the 280 and 295 s shots are the
+        # map screen.  Its 3D camera is not always the same: 4 of 5 runs gave
+        # one frame, 1 a slightly shifted one (keys are sent on the host
+        # clock), so a compare can flag those two shots on an unchanged tree.
+        "seconds": 300,
+        "shots": ["120", "240", "280", "295"],
         "keys": ["240:right", "250:ret"],
         "disc": None,
         "scenario": None,
@@ -92,9 +97,10 @@ def _sha256(path: Path) -> str:
 
 def _board_argv(board_name: str, unit: Path, outdir: Path,
                 disc: Optional[str], scenario: Optional[str],
-                icount: Optional[str]) -> List[str]:
+                icount: Optional[str]) -> Tuple[List[str], dict]:
     """The QEMU command line from the board registry, plus the bootcheck's
-    QMP socket (relative to the output directory) and MMIO trace events."""
+    QMP socket (relative to the output directory) and MMIO trace events;
+    and the board's prepared media."""
     from . import boards
     board = boards.get(board_name)
     if board_name == "cup2006" and scenario:
@@ -121,7 +127,16 @@ def _board_argv(board_name: str, unit: Path, outdir: Path,
                            qmp="qmp.sock")
     if icount:
         argv[argv.index("-icount") + 1] = icount
-    return argv
+    return argv, media
+
+
+def _hdd_problem(board: str, media: dict) -> Optional[str]:
+    """Why the board's HDD cannot show the map, or None.  Only cup2006
+    serves its map from an HDD image."""
+    if board != "cup2006" or not media.get("hdd"):
+        return None
+    from . import boards
+    return boards.get(board).hdd_map_problem(media["hdd"])
 
 
 def _fresh_unit(outdir: Path, unit_arg: Optional[str], board: str) -> Path:
@@ -173,7 +188,15 @@ def cmd_run(args: argparse.Namespace) -> int:
     outdir = OUT_BASE / label
     outdir.mkdir(parents=True, exist_ok=True)
     unit = _fresh_unit(outdir, args.unit, board)
-    argv = _board_argv(board, unit, outdir, disc, scenario, icount)
+    argv, media = _board_argv(board, unit, outdir, disc, scenario, icount)
+    hdd_problem = _hdd_problem(board, media)
+    if hdd_problem and not args.allow_no_map:
+        raise SystemExit(
+            "bootcheck: the cup2006 HDD %s has no installed map (%s), so the "
+            "boot cannot get past \"Disc unavailable\" to the map screen.  "
+            "Delete it and boot once to build the map HDD (or set "
+            "CUP2006_HDD_SET=core for the smaller one), or pass "
+            "--allow-no-map." % (media["hdd"], hdd_problem))
 
     console = outdir / "console.log"
     if board == "cup28":
@@ -199,7 +222,9 @@ def cmd_run(args: argparse.Namespace) -> int:
                     "bootcheck: QEMU exited with code %d before QMP came up; "
                     "stderr tail:\n%s" % (proc.returncode, "\n".join(tail[-20:])))
             try:
-                qmp = QMPClient("unix:" + str(sock)).connect()
+                # A relative path: the absolute one can exceed the 104-byte
+                # sun_path limit on macOS.
+                qmp = QMPClient("unix:" + os.path.relpath(sock)).connect()
             except (OSError, QMPError):
                 if time.monotonic() > deadline:
                     raise SystemExit("bootcheck: QMP socket did not appear "
@@ -259,6 +284,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         "board": board,
         "commit": _git_commit(),
         "argv": argv,
+        "hdd": str(media["hdd"]) if media.get("hdd") else None,
+        "hdd_problem": hdd_problem,
         "seconds": seconds,
         "screenshots": screenshots,
         "mmio_counts": "mmio-counts.json",
@@ -338,6 +365,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "shift=3,sleep=off")
     p.add_argument("--unit", default=None,
                    help="reuse this unit directory instead of a fresh one")
+    p.add_argument("--allow-no-map", action="store_true",
+                   help="cup2006: boot even if the HDD has no installed map "
+                        "(the run then stops at \"Disc unavailable\")")
     p.set_defaults(func=cmd_run)
     p = sub.add_parser("compare", help="compare two recorded runs")
     p.add_argument("label_a")

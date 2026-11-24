@@ -61,3 +61,18 @@ def test_missing_result_is_a_difference(tmp_path):
     base = tmp_path / "bootcheck"
     _write_run(base, "a")
     assert bootcheck.compare("a", "b", base=base)
+
+
+def test_hdd_problem_only_applies_to_cup2006(tmp_path):
+    empty = tmp_path / "empty.img"
+    empty.write_bytes(b"\x00" * 1024)
+    assert bootcheck._hdd_problem("cup28", {"hdd": empty}) is None
+    assert bootcheck._hdd_problem("cup2006", {}) is None
+    assert bootcheck._hdd_problem("cup2006", {"hdd": empty}) == "no MBR"
+
+
+def test_cup2006_defaults_photograph_the_map():
+    d = bootcheck.DEFAULTS["cup2006"]
+    ret = max(float(k.split(":")[0]) for k in d["keys"] if k.endswith(":ret"))
+    assert any(float(t) > ret for t in d["shots"])
+    assert d["seconds"] >= max(float(t) for t in d["shots"])
