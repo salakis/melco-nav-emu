@@ -1,12 +1,11 @@
 /*
- * CU-P2006 machine: GPS tracking chip (measurement level, radio replay), car-sensor track, read-only GPS/locator diagnostics.
- *
- * Part of machine/cup2006.c, compiled as one translation unit (it is
- * #included there, in this order); not a standalone source file.
- *
- * Copyright (c) 2026 melco-nav-emu contributors
+ * Volvo CU-P2006 board: cup2006-gps device.
  * SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright (c) 2026 melco-nav-emu contributors
  */
+
+#include "cup2006-internal.h"
+
 
 void cup2006_mbx_ta_frame(Cup2006MachineState *s);
 
