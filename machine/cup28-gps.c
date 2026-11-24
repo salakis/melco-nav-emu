@@ -1,5 +1,10 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later
- * Copyright (c) 2026 melco-nav-emu contributors */
+/*
+ * Volvo VNS CUP28 board: GPS receiver UART and dead-reckoning sampler.
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright (c) 2026 melco-nav-emu contributors
+ */
+
+#include "cup28-internal.h"
 
 /*
  * CUP28 GPS receiver UART (earlier VNS board).
