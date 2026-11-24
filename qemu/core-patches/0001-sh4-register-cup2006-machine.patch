@@ -7,7 +7,7 @@ Subject: [PATCH 0001] sh4: register the cup2006 machine
 
 Build hw/sh4/cup2006.c (the Volvo RTI MMM+ / CU-P2006 board, from the
 machine/ directory of melco-nav-emu) into qemu-system-sh4, plus the
-shared melco-nvram.c under CONFIG_MELCO_COMMON.
+shared melco-nvram.c / melco-amdflash.c under CONFIG_MELCO_COMMON.
 
 --- a/hw/sh4/Kconfig
 +++ b/hw/sh4/Kconfig
@@ -36,7 +36,7 @@ shared melco-nvram.c under CONFIG_MELCO_COMMON.
  ))
  sh4_ss.add(when: 'CONFIG_R2D', if_true: files('r2d.c'))
 +sh4_ss.add(when: 'CONFIG_CUP2006', if_true: files('cup2006.c'))
-+sh4_ss.add(when: 'CONFIG_MELCO_COMMON', if_true: files('melco-nvram.c'))
++sh4_ss.add(when: 'CONFIG_MELCO_COMMON', if_true: files('melco-nvram.c', 'melco-amdflash.c', 'melco-amdflash-core.c'))
  
  hw_arch += {'sh4': sh4_ss}
 --- a/configs/devices/sh4-softmmu/default.mak

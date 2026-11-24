@@ -11,7 +11,7 @@ calls in machine/cup2006*.c and machine/cup28*.c) to hw/sh4/trace-events, so
 
 --- a/hw/sh4/trace-events
 +++ b/hw/sh4/trace-events
-@@ -1,3 +1,160 @@
+@@ -1,3 +1,164 @@
  # sh7750.c
  sh7750_porta(uint16_t prev, uint16_t cur, uint16_t pdtr, uint16_t pctr) "porta changed from 0x%04x to 0x%04x (pdtra=0x%04x, pctra=0x%08x)"
  sh7750_portb(uint16_t prev, uint16_t cur, uint16_t pdtr, uint16_t pctr) "portb changed from 0x%04x to 0x%04x (pdtrb=0x%04x, pctrb=0x%08x)"
@@ -172,3 +172,7 @@ calls in machine/cup2006*.c and machine/cup28*.c) to hw/sh4/trace-events, so
 +cup28_most_peer_hold_back_queue(void) "cup28: MOST peer hold-back queue full, message dropped"
 +cup28_most_gps_e00_ms_lat(const char * a0, int64_t a1, int a2, int a3) "cup28: MOST GPS 52/E00 %s t=%" PRId64 " ms lat_udeg=%d lon_udeg=%d"
 +cup28_board_event(void) ""
++# melco-amdflash.c
++melco_amdflash_program(uint64_t a0, uint64_t a1, unsigned a2) "melco-amdflash: program 0x%08" PRIx64 " value=0x%08" PRIx64 " size=%u"
++melco_amdflash_sector_erase(uint64_t a0, uint64_t a1) "melco-amdflash: sector erase 0x%08" PRIx64 " len=0x%08" PRIx64
++melco_amdflash_chip_erase(void) "melco-amdflash: chip erase"
