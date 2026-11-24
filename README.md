@@ -19,9 +19,21 @@ One deliberate exception to "hardware only": on a CU-P2006's first power-on
 the host-side launcher (`python -m melco_nav_emu.unit`) writes the unit's own map-install
 record into its battery RAM, because the served HDD already holds the complete
 map install and there is no real install process to run (marked `STUB` there;
-see "CU-P2006 unit state" below). For the same reason no UI screenshots are
-published: a capture of the running unit would show the proprietary map data
-and firmware interface.
+see "CU-P2006 unit state" below).
+
+## Screenshots
+
+Both machines' own UI, captured from QEMU's display on screens that show no map
+data: `ESC` in the map view opens the unit's settings, and the about screen is
+the last entry of the system settings list (opened with the right arrow).
+
+| | `cup2006` (CU-P2006) | `cup28` (CUP28) |
+|---|---|---|
+| system settings | ![CU-P2006 system settings](screenshots/cup2006-settings.png) | ![CUP28 system settings](screenshots/cup28-settings.png) |
+| about | ![CU-P2006 about screen](screenshots/cup2006-about.png) | ![CUP28 about screen](screenshots/cup28-about.png) |
+
+CUP28's HW version field reads back as unknown characters, because the machine
+does not model it.
 
 ## Requirements and building
 
@@ -306,6 +318,7 @@ qemu/core-patches/  machine registration, small SH-4 changes, and
 docs/               board model notes (docs/board-cup28.md)
 scenarios/          two 3-minute GPS drives (OpenStreetMap-based, ODbL 1.0:
                     see scenarios/LICENSE)
+screenshots/        UI screenshots (plain PNGs, no metadata chunks)
 scripts/            build QEMU, extract the discs, carve the firmware,
                     build and verify the HDD
 src/melco_nav_emu/  Python package: image parsers, QMP client, CLI,
