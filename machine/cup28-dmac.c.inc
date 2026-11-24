@@ -26,7 +26,7 @@ static void cup28_dmac_irq(Cup28MachineState *s)
     }
 }
 
-static void cup28_dmac_try(Cup28MachineState *s)
+void cup28_dmac_try(Cup28MachineState *s)
 {
     uint32_t chcr = ldl_le_p(s->p28_dmac_reg + 0x0c);
     uint32_t dmaor = ldl_le_p(s->p28_dmac_reg + 0x40);
@@ -93,7 +93,7 @@ static const MemoryRegionOps cup28_dmac_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-static void cup28_dmac_init(Cup28MachineState *s, MemoryRegion *sysmem,
+void cup28_dmac_init(Cup28MachineState *s, MemoryRegion *sysmem,
                              SuperHCPU *cpu)
 {
     struct intc_desc *desc = cpu->env.intc_handle;

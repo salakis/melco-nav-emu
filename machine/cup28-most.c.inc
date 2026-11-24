@@ -34,7 +34,7 @@ static void cup28_most_irq_line(struct intc_source *src, bool active)
     }
 }
 
-static void cup28_most_chip_irq(Cup28MachineState *s)
+void cup28_most_chip_irq(Cup28MachineState *s)
 {
     if (!s->p28_most_chip_src) {
         return;
@@ -204,7 +204,7 @@ static void cup28_most_vc_deliver(Cup28MachineState *s)
 /* STUB: the vehicle peer reports its wrapping wheel counter at the gyro
  * sampling cadence. F5/201 Status -> mst.dll 0x0103fa2c -> event 0x6f.
  * ClassLib 0x015445c0 queues byte 1 and 0x0153be94 takes modulo-256 deltas. */
-static void cup28_most_wheel_send(Cup28MachineState *s)
+void cup28_most_wheel_send(Cup28MachineState *s)
 {
     uint8_t message[] = { 0xf5, 0, 0x20, 0x1c, 1,
                           s->p28_most_wheel_counter };
@@ -445,7 +445,7 @@ static void cup28_most_chip_write(Cup28MachineState *s, uint8_t map, uint8_t byt
     cup28_most_chip_irq(s);
 }
 
-static void cup28_most_irq(Cup28MachineState *s)
+void cup28_most_irq(Cup28MachineState *s)
 {
     struct intc_source *src = s->p28_most_src;
     bool active = (s->p28_most_control & 0x38) &&
@@ -479,7 +479,7 @@ static void cup28_most_schedule(Cup28MachineState *s)
     }
 }
 
-static void cup28_most_gpio(Cup28MachineState *s, uint32_t old, uint32_t value)
+void cup28_most_gpio(Cup28MachineState *s, uint32_t old, uint32_t value)
 {
     /* The guest's repeated-start flag 70 toggles GPIO bit 4 high then
      * low between MAP and read address (NK 80085190). */
@@ -731,7 +731,7 @@ static void cup28_most_gps_tick(void *opaque)
               qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 1000000000LL);
 }
 
-static void cup28_most_init(Cup28MachineState *s, MemoryRegion *mem, SuperHCPU *cpu)
+void cup28_most_init(Cup28MachineState *s, MemoryRegion *mem, SuperHCPU *cpu)
 {
     struct intc_desc *desc = cpu->env.intc_handle;
     for (unsigned i = 0; desc && i < desc->nr_sources; i++) {

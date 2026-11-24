@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later
  * Copyright (c) 2026 melco-nav-emu contributors */
 
-static void cup28_bksram_init(Cup28MachineState *s)
+void cup28_bksram_init(Cup28MachineState *s)
 {
     const char *name = "cup28-backup-sram";
     const char *path = s->sramsave;

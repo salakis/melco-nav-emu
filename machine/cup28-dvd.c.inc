@@ -53,7 +53,7 @@ static void cup28_dvd_irq_src(Cup28MachineState *s, struct intc_source *src,
     }
 }
 
-static void cup28_dvd_irq(Cup28MachineState *s)
+void cup28_dvd_irq(Cup28MachineState *s)
 {
     unsigned active = ldl_le_p(s->p28_dvd_control_reg + 0x40) &
                       ldl_le_p(s->p28_dvd_control_reg + 0x44) & 3;
@@ -350,8 +350,6 @@ static const MemoryRegionOps cup28_eeprom_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-#define CUP28_EEPROM_BASE 0x07800000
-#define CUP28_EEPROM_SIZE 0x00800000
 
 /* FLR_Read maps this 256 KiB window (ROM literals 0x00fd1db4/0x00fd1dbc). */
 static uint64_t cup28_flr_read(void *opaque, hwaddr addr, unsigned size)

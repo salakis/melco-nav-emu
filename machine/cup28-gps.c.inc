@@ -46,7 +46,7 @@ static bool cup28_gps_tx_int(Cup28MachineState *s)
     return (s->p28_gps_ier & 2) != 0; /* THR is always empty */
 }
 
-static void cup28_gps_irq(Cup28MachineState *s)
+void cup28_gps_irq(Cup28MachineState *s)
 {
     uint8_t *c = s->p28_dvd_control_reg;
     uint32_t tx = ldl_le_p(c);
@@ -137,7 +137,7 @@ static const MemoryRegionOps cup28_gps_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-static void cup28_gps_init(Cup28MachineState *s, MemoryRegion *mem,
+void cup28_gps_init(Cup28MachineState *s, MemoryRegion *mem,
                            SuperHCPU *cpu)
 {
     struct intc_desc *desc = cpu->env.intc_handle;
@@ -185,7 +185,7 @@ static void cup28_gps_init(Cup28MachineState *s, MemoryRegion *mem,
 /* STUB: nominal transducer scale from the MMM+ locator defaults. */
 #define CUP28_SNS_PULSES_PER_M 0.44902
 
-static void cup28_sns_irq(Cup28MachineState *s)
+void cup28_sns_irq(Cup28MachineState *s)
 {
     uint8_t *c = s->p28_dvd_control_reg;
 
@@ -249,7 +249,7 @@ static const MemoryRegionOps cup28_pulse_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-static void cup28_sns_init(Cup28MachineState *s, MemoryRegion *mem,
+void cup28_sns_init(Cup28MachineState *s, MemoryRegion *mem,
                            SuperHCPU *cpu)
 {
     struct intc_desc *desc = cpu->env.intc_handle;

@@ -1,9 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later
  * Copyright (c) 2026 melco-nav-emu contributors */
 
-#define CUP28_RTC_BASE        0xffc80000
-#define CUP28_RTC_A7_BASE     0x1fc80000
-#define CUP28_RTC_SIZE        0x00000100
 #define CUP28_RTC_LATCH       0x0002
 #define CUP28_RTC_STATUS      0x0004
 #define CUP28_RTC_YEAR        0x0012
@@ -15,7 +12,6 @@
 #define CUP28_RTC_SECOND_SHIFT 5
 #define CUP28_RTC_SET_YEAR    0x0006  /* +0x06..+0x10: fields to set */
 #define CUP28_RTC_SET_SECOND  0x0010
-#define CUP28_RTC_EPOCH       1252487349  /* 2009-09-09 09:09:09 UTC */
 
 /* Seconds the RTC reads now (power-on epoch plus guest time since the last set). */
 static int64_t cup28_rtc_now_s(Cup28MachineState *s)

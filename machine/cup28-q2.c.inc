@@ -12,7 +12,7 @@ static uint16_t cup28_q2_reg(Cup28MachineState *s, unsigned off)
 /* The guest's NK hooks INTC index 7 (INTEVT 0x2e0): the ISR masks
  * CPLD +0x100[31:28], acknowledges +0x70 bit 0, and returns SYSINTR 0x10.
  * Q2 manual 5.2.4: IRQ = SR & IER. */
-static void cup28_q2_irq(Cup28MachineState *s)
+void cup28_q2_irq(Cup28MachineState *s)
 {
     struct intc_source *src = s->p28_q2_intc_src;
     unsigned priority = ldl_le_p(s->p28_dvd_control_reg + 0x100) >> 28;
@@ -31,7 +31,7 @@ static void cup28_q2_irq(Cup28MachineState *s)
     }
 }
 
-static void cup28_q2_irq_init(Cup28MachineState *s, SuperHCPU *cpu)
+void cup28_q2_irq_init(Cup28MachineState *s, SuperHCPU *cpu)
 {
     struct intc_desc *desc = cpu->env.intc_handle;
     for (unsigned i = 0; desc && i < desc->nr_sources; i++) {

@@ -255,7 +255,7 @@ static void cup28_audio_shutdown(Notifier *notifier, void *data)
     s->p28_audio_out = NULL;
 }
 
-static void cup28_audio_init(Cup28MachineState *s, MemoryRegion *mem,
+void cup28_audio_init(Cup28MachineState *s, MemoryRegion *mem,
                              const char *audiodev)
 {
     s->p28_audio_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
