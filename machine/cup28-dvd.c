@@ -1,5 +1,10 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later
- * Copyright (c) 2026 melco-nav-emu contributors */
+/*
+ * Volvo VNS CUP28 board: DVD drive, EEPROM and FLR window.
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright (c) 2026 melco-nav-emu contributors
+ */
+
+#include "cup28-internal.h"
 
 /* CUP28 byte-port drive link. NK hooks 0x80083a8e and 0x80083a96
  * select the CPLD interrupt lines. Status framing follows dvd.dll
@@ -87,7 +92,7 @@ static void cup28_dvd_schedule(Cup28MachineState *s)
     }
 }
 
-static void cup28_dvd_tick(void *opaque)
+void cup28_dvd_tick(void *opaque)
 {
     Cup28MachineState *s = opaque;
     int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);

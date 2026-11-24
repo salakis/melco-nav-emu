@@ -197,5 +197,7 @@ void cup28_register_write(uint8_t *regs, hwaddr addr, uint64_t value,
                           unsigned size);
 void cup28_sns_init(Cup28MachineState *s, MemoryRegion *mem, SuperHCPU *cpu);
 void cup28_sns_irq(Cup28MachineState *s);
+void cup28_dvd_tick(void *opaque);
+void cup28_q2_tick(void *opaque);
 
 #endif /* CUP28_INTERNAL_H */

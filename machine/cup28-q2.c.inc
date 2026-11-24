@@ -880,7 +880,7 @@ static void cup28_q2_exec_list(Cup28MachineState *s, unsigned dl)
     cup28_q2_irq(s);
 }
 
-static void cup28_q2_tick(void *opaque)
+void cup28_q2_tick(void *opaque)
 {
     Cup28MachineState *s = opaque;
     unsigned sysr = cup28_q2_reg(s, 0);
