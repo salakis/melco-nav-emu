@@ -20,10 +20,6 @@ static void cup2006_mbx_note(Cup2006MachineState *s, hwaddr phys,
 {
     unsigned i;
 
-    if (!s->verbose) {
-        return;
-    }
-
     for (i = 0; i < s->mbx_log_nr; i++) {
         if (s->mbx_log[i].addr == phys &&
             s->mbx_log[i].is_write == is_write) {
@@ -33,19 +29,14 @@ static void cup2006_mbx_note(Cup2006MachineState *s, hwaddr phys,
     if (s->mbx_log_nr == CUP2006_MBX_LOG_MAX) {
         if (!s->mbx_log_full_warned) {
             s->mbx_log_full_warned = true;
-            cup2006_dbg(s, "cup2006: STUB mbx log full (%u addresses);"
-                    " further registers are not listed\n", CUP2006_MBX_LOG_MAX);
+            trace_cup2006_du_stub_mbx_log_full(CUP2006_MBX_LOG_MAX);
         }
         return;
     }
     s->mbx_log[s->mbx_log_nr].addr = phys;
     s->mbx_log[s->mbx_log_nr].is_write = is_write;
     s->mbx_log_nr++;
-    cup2006_dbg(s, "cup2006: STUB mbx register 0x%08" PRIx32
-            " (%s, size=%u) value=0x%" PRIx64
-            "; +0x%03x reads the model status word (0 while idle)\n",
-            (uint32_t)phys, is_write ? "write" : "read", size, value,
-            CUP2006_MBX_STATUS);
+    trace_cup2006_du_stub_mbx_register_size((uint32_t)phys, is_write ? "write" : "read", size, value, CUP2006_MBX_STATUS);
 }
 
 /*
@@ -72,23 +63,13 @@ static void cup2006_mbx_update_irq(Cup2006MachineState *s, const char *why)
     if (now && !s->mbx_irq_active) {
         sh_intc_toggle_source(src, 0, 1);
         s->mbx_irq_raises++;
-        cup2006_dbg(s,  "cup2006: MBX INTEVT 0x%03x raised #%" PRIu64
-                " why=%s status=0x%08x enable=0x%08x pc=0x%08x t=%" PRId64
-                "ms\n", CUP2006_DISP_INTEVT_MBX, s->mbx_irq_raises, why,
-                s->mbx_status,
-                s->mbx_window[CUP2006_MBX_ENABLE >> 2] & 0xffff,
-                cup2006_guest_pc(),
-                qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+        trace_cup2006_du_mbx_intevt_raised_why(CUP2006_DISP_INTEVT_MBX, s->mbx_irq_raises, why, s->mbx_status, s->mbx_window[CUP2006_MBX_ENABLE >> 2] & 0xffff, cup2006_guest_pc(), qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
     } else if (!now && s->mbx_irq_active) {
         if (src->asserted) {
             sh_intc_toggle_source(src, 0, -1);
         }
         s->mbx_irq_drops++;
-        cup2006_dbg(s,  "cup2006: MBX INTEVT 0x%03x released #%" PRIu64
-                " why=%s status=0x%08x pc=0x%08x t=%" PRId64 "ms\n",
-                CUP2006_DISP_INTEVT_MBX, s->mbx_irq_drops, why,
-                s->mbx_status, cup2006_guest_pc(),
-                qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+        trace_cup2006_du_mbx_intevt_released_why(CUP2006_DISP_INTEVT_MBX, s->mbx_irq_drops, why, s->mbx_status, cup2006_guest_pc(), qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
     }
     s->mbx_irq_active = now;
 }
@@ -131,10 +112,7 @@ static uint64_t cup2006_mbx_read(Cup2006MachineState *s, hwaddr base,
             s->mbx_status_done_reads++;
             if (s->mbx_status_done_reads <= 8 ||
                 (s->mbx_status_done_reads & 0xff) == 0) {
-                cup2006_dbg(s,  "cup2006: mbx status +0x12c done read"
-                        " pc=0x%08x value=0x%08x n=%" PRIu64 "\n",
-                        cup2006_guest_pc(), value,
-                        s->mbx_status_done_reads);
+                trace_cup2006_du_mbx_status_x12c_done(cup2006_guest_pc(), value, s->mbx_status_done_reads);
             }
         }
     }
@@ -191,7 +169,7 @@ static void cup2006_du_scanout(Cup2006MachineState *s)
     }
     if (dppr != dppr_logged) {
         dppr_logged = dppr;
-        cup2006_dbg(s,  "cup2006: DU DPPR=0x%08x\n", dppr);
+        trace_cup2006_du_dppr(dppr);
     }
 
     if (!s->disp_con) {
@@ -330,9 +308,7 @@ static void cup2006_display_create(Cup2006MachineState *s)
                                          CUP2006_DU_CONSOLE_H);
     qemu_console_set_surface(s->disp_con, surface);
     cup2006_display_update(s);
-    cup2006_info(s, "cup2006: DU graphic console 0: %dx%d active area"
-                " (SH7785-compatible DU scan-out)",
-                CUP2006_DU_CONSOLE_W, CUP2006_DU_CONSOLE_H);
+    trace_cup2006_du_graphic_console_active_area(CUP2006_DU_CONSOLE_W, CUP2006_DU_CONSOLE_H);
 }
 
 /* ----------------------------------------------------------------*/
@@ -388,9 +364,7 @@ static void cup2006_du_report(Cup2006MachineState *s, unsigned plane)
     s->du_reported[plane].h = dsy;
     s->du_reported[plane].stride = stride;
     s->du_reported[plane].fmt = ddf;
-    cup2006_dbg(s,  "cup2006: EVT du plane=%u base=0x%08x w=%u h=%u"
-            " stride=%u fmt=%s\n", plane, base, dsx, dsy, stride,
-            cup2006_du_fmt_name(mr));
+    trace_cup2006_du_evt_du_plane_base(plane, base, dsx, dsy, stride, cup2006_du_fmt_name(mr));
     /*
      * Start the frame tick on the first complete plane setup so DSSR/DIER
      * and the scan-out are live.
@@ -418,9 +392,7 @@ static void cup2006_du_update_irq(Cup2006MachineState *s)
         sh_intc_toggle_source(src, 0, 1);
         s->du_irqs++;
         if (s->du_irqs <= 8 || (s->du_irqs & 0xff) == 0) {
-            cup2006_dbg(s,  "cup2006: DU INTEVT 0x780 raised #%" PRIu64
-                    " DSSR=0x%08x DIER=0x%08x\n", s->du_irqs,
-                    s->du_status, s->du_dier);
+            trace_cup2006_du_intevt_x780_raised_dssr(s->du_irqs, s->du_status, s->du_dier);
         }
     }
 }
@@ -488,8 +460,7 @@ static void cup2006_du_start(Cup2006MachineState *s)
     s->du_enabled = true;
     timer_mod(s->du_frame_timer,
               qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + CUP2006_DU_FRAME_NS);
-    cup2006_info(s, "cup2006: DU display enabled (DSYSR DEN), scanning out"
-                " guest planes at 10 Hz");
+    trace_cup2006_du_display_enabled_dsysr_den();
 }
 
 static uint64_t cup2006_du_read_at(Cup2006MachineState *s, hwaddr addr,

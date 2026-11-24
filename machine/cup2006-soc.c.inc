@@ -130,10 +130,7 @@ static void cup2006_rtc_write(void *opaque, hwaddr addr, uint64_t value,
 
         s->rtc_base_s = (int64_t)timegm(&tm);
         s->rtc_base_ms = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL);
-        cup2006_info(s, "cup2006: rtc set by the guest to %04d-%02d-%02d"
-                    " %02d:%02d:%02d at %" PRId64 " ms", tm.tm_year + 1900,
-                    tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min,
-                    tm.tm_sec, s->rtc_base_ms);
+        trace_cup2006_soc_rtc_set_by_the(tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, s->rtc_base_ms);
     }
 }
 
@@ -173,18 +170,11 @@ static void cup2006_pcc_note(Cup2006MachineState *s, unsigned slot, hwaddr off,
 {
     uint8_t bit = is_write ? 2 : 1;
 
-    if (!s->verbose) {
-        return;
-    }
-
     if (off >= CUP2006_PCC_REGS_SIZE || (s->pcc_seen[slot][off] & bit)) {
         return;
     }
     s->pcc_seen[slot][off] |= bit;
-    cup2006_dbg(s,  "cup2006: pcc slot %u %s +0x%02" HWADDR_PRIx
-            " size=%u value=0x%04" PRIx64 " abs=0x%08" HWADDR_PRIx "\n",
-            slot, is_write ? "write" : "read", off, size, value,
-            CUP2006_PCC_BASE + slot * CUP2006_PCC_SLOT_SIZE +
+    trace_cup2006_soc_pcc_slot_prix64_size(slot, is_write ? "write" : "read", off, size, value, CUP2006_PCC_BASE + slot * CUP2006_PCC_SLOT_SIZE +
             CUP2006_PCC_REGS_OFF + off);
 }
 
@@ -259,10 +249,6 @@ static void cup2006_pcc_cis_note(Cup2006PccCis *c, hwaddr off,
     uint8_t bit = is_write ? 2 : 1;
     static const hwaddr base[CUP2006_PCC_CIS_BASES] = CUP2006_PCC_CIS_OFFS;
 
-    if (!s->verbose) {
-        return;
-    }
-
     if (s->pcc_cis_seen[c->base][off] & bit) {
         return;
     }
@@ -274,12 +260,7 @@ static void cup2006_pcc_cis_note(Cup2006PccCis *c, hwaddr off,
     {
         CPUSH4State *env = current_cpu ? (CPUSH4State *)cpu_env(current_cpu) : NULL;
 
-        cup2006_dbg(s,  "cup2006: pcc cis %s +0x%03" HWADDR_PRIx
-                " size=%u value=0x%" PRIx64 " abs=0x%08" HWADDR_PRIx
-                " pc=0x%08" PRIx32 " pr=0x%08" PRIx32 "\n",
-                is_write ? "write" : "read", off, size, value,
-                CUP2006_PCC_BASE + base[c->base] + off,
-                env ? env->pc : 0, env ? env->pr : 0);
+        trace_cup2006_soc_pcc_cis_prix64_size(is_write ? "write" : "read", off, size, value, CUP2006_PCC_BASE + base[c->base] + off, env ? env->pc : 0, env ? env->pr : 0);
     }
 }
 

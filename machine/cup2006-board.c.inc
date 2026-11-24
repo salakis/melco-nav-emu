@@ -149,10 +149,6 @@ static void cup2006_gps_note(Cup2006MachineState *s, hwaddr phys,
 {
     unsigned i;
 
-    if (!s->verbose) {
-        return;
-    }
-
     for (i = 0; i < s->gps_log_nr; i++) {
         if (s->gps_log[i].addr == phys &&
             s->gps_log[i].is_write == is_write) {
@@ -162,19 +158,14 @@ static void cup2006_gps_note(Cup2006MachineState *s, hwaddr phys,
     if (s->gps_log_nr == CUP2006_GPS_LOG_MAX) {
         if (!s->gps_log_full_warned) {
             s->gps_log_full_warned = true;
-            cup2006_dbg(s, "cup2006: STUB gps log full (%u addresses);"
-                    " further accesses are not listed\n", CUP2006_GPS_LOG_MAX);
+            trace_cup2006_board_stub_gps_log_full(CUP2006_GPS_LOG_MAX);
         }
         return;
     }
     s->gps_log[s->gps_log_nr].addr = phys;
     s->gps_log[s->gps_log_nr].is_write = is_write;
     s->gps_log_nr++;
-    cup2006_dbg(s, "cup2006: STUB gps register 0x%08" PRIx32
-            " (%s, size=%u) value=0x%" PRIx64
-            "; +0x00c reads 0x%08x (bits 1:0 = 0b01)\n",
-            (uint32_t)phys, is_write ? "write" : "read", size, value,
-            CUP2006_GPS_STATUS_READY);
+    trace_cup2006_board_stub_gps_register_size((uint32_t)phys, is_write ? "write" : "read", size, value, CUP2006_GPS_STATUS_READY);
 }
 
 /*

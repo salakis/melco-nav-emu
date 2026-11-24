@@ -15,25 +15,8 @@
  */
 static void cup2006_ata_summary(Cup2006MachineState *s)
 {
-    if (!s->verbose) {
-        return;
-    }
-
-    cup2006_dbg(s,
-            "cup2006: ata summary: events=%" PRIu64 " cmd=%" PRIu64
-            " identify=%" PRIu64 " read_dma=%" PRIu64
-            " read_sectors=%" PRIu64 " write_dma=%" PRIu64
-            " write_sectors=%" PRIu64 " dma_fail=%" PRIu64
-            " other=%" PRIu64 " reg_reads=%" PRIu64
-            " reg_writes=%" PRIu64 " irq_cmd=%" PRIu64
-            " irq_raise=%" PRIu64 " irq_drop=%" PRIu64
-            " irq_rearm=%" PRIu64 " irq_deassert=%" PRIu64 "\n",
-            s->ata_events, s->ata_cmd_count, s->ata_identify,
-            s->ata_read_dma, s->ata_read_sectors, s->ata_write_dma,
-            s->ata_write_sectors, s->ata_dma_fail, s->ata_other_cmds,
-            s->ata_reg_reads, s->ata_reg_writes,
-            s->ata_irq_cmds, s->ata_irq_raise, s->ata_irq_drop,
-            s->ata_irq_rearm, s->ata_irq_deassert);
+    trace_cup2006_ata_summary_a(s->ata_events, s->ata_cmd_count, s->ata_identify, s->ata_read_dma, s->ata_read_sectors, s->ata_write_dma, s->ata_write_sectors, s->ata_dma_fail, s->ata_other_cmds, s->ata_reg_reads);
+    trace_cup2006_ata_summary_b(s->ata_reg_writes, s->ata_irq_cmds, s->ata_irq_raise, s->ata_irq_drop, s->ata_irq_rearm, s->ata_irq_deassert);
 }
 
 static void cup2006_ata_event(Cup2006MachineState *s)
@@ -331,29 +314,15 @@ static bool cup2006_ata_dma_transfer(Cup2006MachineState *s, bool write)
         s->ata_write_sectors += len / 512;
         if (s->ata_write_logged < 8) {
             s->ata_write_logged++;
-            cup2006_dbg(s,
-                    "cup2006: ata write dma done lba=0x%x count=%u"
-                    " len=0x%x dest=0x%08x pc=0x%08" PRIx32
-                    " image_bytes=%" PRIu64 "\n",
-                    lba, count, len, dest, s->ata_dma_cmd_pc,
-                    s->hdd_size);
+            trace_cup2006_ata_write_dma_done_lba(lba, count, len, dest, s->ata_dma_cmd_pc, s->hdd_size);
         }
     } else {
         s->ata_read_dma++;
         s->ata_read_sectors += len / 512;
         if (s->ata_read_logged < 8) {
             s->ata_read_logged++;
-            cup2006_dbg(s,
-                    "cup2006: ata read dma done lba=0x%x count=%u"
-                    " len=0x%x dest=0x%08x pc=0x%08" PRIx32
-                    " image_bytes=%" PRIu64
-                    " sig=%02x%02x fs=%02x%02x%02x%02x%02x\n",
-                    lba, count, len, dest, s->ata_dma_cmd_pc,
-                    s->hdd_size, len > 511 ? buf[510] : 0,
-                    len > 511 ? buf[511] : 0,
-                    len > 58 ? buf[54] : 0, len > 58 ? buf[55] : 0,
-                    len > 58 ? buf[56] : 0, len > 58 ? buf[57] : 0,
-                    len > 58 ? buf[58] : 0);
+            trace_cup2006_ata_read_dma_done(lba, count, len, dest, s->ata_dma_cmd_pc, s->hdd_size, len > 511 ? buf[510] : 0, len > 511 ? buf[511] : 0);
+            trace_cup2006_ata_read_dma_done_fs(len > 58 ? buf[54] : 0, len > 58 ? buf[55] : 0, len > 58 ? buf[56] : 0, len > 58 ? buf[57] : 0, len > 58 ? buf[58] : 0);
         }
     }
     g_free(buf);
@@ -398,17 +367,7 @@ static const uint32_t cup2006_disp_ack_bit[CUP2006_DISP_LINES] = {
 
 static void cup2006_intc2_summary(Cup2006MachineState *s)
 {
-    if (!s->verbose) {
-        return;
-    }
-
-    cup2006_dbg(s,  "cup2006: STUB intc2 summary writes=%" PRIu64
-            " ack11=%" PRIu64 " ack12=%" PRIu64 " ack1a=%" PRIu64
-            " en11=%" PRIu64 " en12=%" PRIu64 " en1a=%" PRIu64
-            " other=%" PRIu64 "\n",
-            s->intc2_writes, s->disp_ack[0], s->disp_ack[1],
-            s->disp_ack[2], s->disp_enable[0], s->disp_enable[1],
-            s->disp_enable[2], s->intc2_other);
+    trace_cup2006_ata_stub_intc2_summary_writes(s->intc2_writes, s->disp_ack[0], s->disp_ack[1], s->disp_ack[2], s->disp_enable[0], s->disp_enable[1], s->disp_enable[2], s->intc2_other);
 }
 
 static uint64_t cup2006_intc2_read_at(Cup2006MachineState *s, hwaddr base,
@@ -551,9 +510,7 @@ static void cup2006_ata_irq_fire(void *opaque)
         s->ata_irq_pending = false;
         s->ata_irq_raise++;
         if (s->ata_irq_raise <= 8) {
-            cup2006_dbg(s,  "cup2006: ata completion IRQ %" PRIu64
-                    " raised (INTEVT 0x%03x -> SYSINTR 23)\n",
-                    s->ata_irq_raise, CUP2006_ATA_INTEVT);
+            trace_cup2006_ata_completion_irq_raised_intevt(s->ata_irq_raise, CUP2006_ATA_INTEVT);
         }
     } else {
         /*
@@ -585,11 +542,7 @@ static uint64_t cup2006_ata_read(void *opaque, hwaddr addr, unsigned size)
 
     if (addr != CUP2006_ATA_DATA && s->ata_ident_reads &&
         addr == CUP2006_ATA_COMMAND) {
-        cup2006_dbg(s,
-                "cup2006: ata identify read stopped: data_reads=%u pos=%u/%u"
-                " pc=0x%08" PRIx32 "\n",
-                s->ata_ident_reads, s->ata_ident_pos, s->ata_ident_len,
-                cup2006_guest_pc());
+        trace_cup2006_ata_identify_read_stopped_data(s->ata_ident_reads, s->ata_ident_pos, s->ata_ident_len, cup2006_guest_pc());
         s->ata_ident_reads = 0;
     }
 
@@ -638,11 +591,7 @@ static uint64_t cup2006_ata_read(void *opaque, hwaddr addr, unsigned size)
         s->ata_ident_reads++;
         if (s->ata_ident_pos >= s->ata_ident_len &&
             (s->ata_status & CUP2006_ATA_SR_DRQ)) {
-            cup2006_dbg(s,
-                    "cup2006: ata identify data complete: data_reads=%u"
-                    " pos=%u/%u pc=0x%08" PRIx32 "\n",
-                    s->ata_ident_reads, s->ata_ident_pos, s->ata_ident_len,
-                    cup2006_guest_pc());
+            trace_cup2006_ata_identify_data_complete_data(s->ata_ident_reads, s->ata_ident_pos, s->ata_ident_len, cup2006_guest_pc());
             s->ata_status = CUP2006_ATA_SR_DRDY;
         }
         return value;
@@ -673,11 +622,7 @@ static void cup2006_ata_write(void *opaque, hwaddr addr, uint64_t value,
     }
 
     if (s->ata_ident_reads && addr == CUP2006_ATA_COMMAND) {
-        cup2006_dbg(s,
-                "cup2006: ata identify read stopped: data_reads=%u pos=%u/%u"
-                " pc=0x%08" PRIx32 "\n",
-                s->ata_ident_reads, s->ata_ident_pos, s->ata_ident_len,
-                cup2006_guest_pc());
+        trace_cup2006_ata_identify_read_stopped_data_2(s->ata_ident_reads, s->ata_ident_pos, s->ata_ident_len, cup2006_guest_pc());
         s->ata_ident_reads = 0;
     }
 
@@ -730,18 +675,10 @@ static void cup2006_ata_write(void *opaque, hwaddr addr, uint64_t value,
         s->ata_cmd_count++;
         if (s->ata_cmd_logged < 32) {
             s->ata_cmd_logged++;
-            cup2006_dbg(s,
-                    "cup2006: ata cmd 0x%02x n=%" PRIu64 " pc=0x%08" PRIx32
-                    " count=%u lba=0x%x dev=0x%02x t=%" PRId64 "ms\n", cmd,
-                    s->ata_cmd_count, cup2006_guest_pc(),
-                    s->ata_shadow[0x008 >> 2] & 0xff, cup2006_ata_lba(s),
-                    dev, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+            trace_cup2006_ata_cmd_count_lba_dev(cmd, s->ata_cmd_count, cup2006_guest_pc(), s->ata_shadow[0x008 >> 2] & 0xff, cup2006_ata_lba(s), dev, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
         }
         if (first) {
-            cup2006_dbg(s,
-                    "cup2006: ata command 0x%02x first pc=0x%08" PRIx32
-                    " count=%u lba=0x%x\n", cmd, cup2006_guest_pc(),
-                    s->ata_shadow[0x008 >> 2] & 0xff, cup2006_ata_lba(s));
+            trace_cup2006_ata_command_first_pc_count(cmd, cup2006_guest_pc(), s->ata_shadow[0x008 >> 2] & 0xff, cup2006_ata_lba(s));
         }
 
         if (cmd == 0xec) {          /* IDENTIFY DEVICE */

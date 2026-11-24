@@ -153,8 +153,7 @@ static void cup2006_bkram_init(Cup2006MachineState *s, MemoryRegion *sysmem)
     s->bkram_timer = timer_new_ms(QEMU_CLOCK_REALTIME, cup2006_bkram_timer_cb,
                                   s);
     timer_mod(s->bkram_timer, qemu_clock_get_ms(QEMU_CLOCK_REALTIME) + 2000);
-    cup2006_info(s, "cup2006: backup RAM 0x%08x (1 MiB) <- %s (%zu bytes loaded)",
-                CUP2006_BKRAM_BASE, path, n);
+    trace_cup2006_flash_backup_ram_mib_bytes(CUP2006_BKRAM_BASE, path, n);
 }
 
 /*
@@ -211,8 +210,7 @@ static void cup2006_sramsave_init(Cup2006MachineState *s)
     s->sramsave_timer = timer_new_ms(QEMU_CLOCK_REALTIME,
                                      cup2006_sramsave_timer_cb, s);
     timer_mod(s->sramsave_timer, qemu_clock_get_ms(QEMU_CLOCK_REALTIME) + 2000);
-    cup2006_info(s, "cup2006: battery SRAM 0x%08" HWADDR_PRIx " (64 KiB) <- %s"
-                " (%zu bytes loaded)", base, path, (size_t)size);
+    trace_cup2006_flash_battery_sram_prix64_kib(base, path, (size_t)size);
 }
 
 static void cup2006_drf_save_timer(void *opaque)

@@ -64,8 +64,7 @@ static void cup2006_dg_skip(Cup2006MachineState *s, uint32_t pc,
                             const char *why, uint32_t word)
 {
     s->dg_skipped++;
-    cup2006_dbg(s,  "cup2006: 2DG skip pc=0x%08x word=0x%08x: %s\n",
-            pc, word, why);
+    trace_cup2006_2dg_dg_skip_pc_word(pc, word, why);
 }
 
 /*
@@ -830,8 +829,7 @@ static void cup2006_dg_work_op(Cup2006MachineState *s, int x, int y, int op)
 
     if (++s->dg_work_ops > CUP2006_DG_WORK_BUDGET) {
         if (s->dg_work_ops == CUP2006_DG_WORK_BUDGET + 1) {
-            cup2006_dbg(s,  "cup2006: 2DG work budget exceeded in job#%"
-                    PRIu64 "\n", s->dg_jobs);
+            trace_cup2006_2dg_dg_work_budget_exceeded(s->dg_jobs);
         }
         return;
     }
@@ -1173,8 +1171,7 @@ static void cup2006_dg_execute(Cup2006MachineState *s)
         uint32_t op;
 
         if (!cup2006_dg_fetch(s, pc, &w0)) {
-            cup2006_dbg(s,  "cup2006: 2DG walk stop: fetch at 0x%08x"
-                    " outside RAM\n", pc);
+            trace_cup2006_2dg_dg_walk_stop_fetch(pc);
             break;
         }
         op = w0 >> 24;
@@ -1412,12 +1409,7 @@ static void cup2006_dg_execute(Cup2006MachineState *s)
             break;
         }
     }
-    cup2006_dbg(s,  "cup2006: 2DG raster job#%" PRIu64 " list=0x%08x"
-            " steps=%u packets=%u blits=%" PRIu64 " pixels=%" PRIu64
-            " skipped=%" PRIu64 " dest=0x%08x\n",
-            s->dg_jobs, s->dg_reg[CUP2006_DG_LIST >> 2], steps, packets,
-            s->dg_blits - blits0, pixels, s->dg_skipped - skip0,
-            s->dg_reg[CUP2006_DG_DEST >> 2]);
+    trace_cup2006_2dg_dg_raster_job_st(s->dg_jobs, s->dg_reg[CUP2006_DG_LIST >> 2], steps, packets, s->dg_blits - blits0, pixels, s->dg_skipped - skip0, s->dg_reg[CUP2006_DG_DEST >> 2]);
 }
 
 /*
@@ -1447,34 +1439,22 @@ static void cup2006_dg_start(Cup2006MachineState *s)
     if (!intc2_en) {
         s->dg_disabled_jobs++;
         if (s->dg_disabled_jobs <= 4) {
-            cup2006_dbg(s,  "cup2006: 2DG job #%" PRIu64 " done; INTC2"
-                    " 0xFFE00044 bit 20 is clear, so the guest has not enabled"
-                    " INTEVT 0x8c0: no interrupt\n", s->dg_jobs);
+            trace_cup2006_2dg_dg_job_one_intc2(s->dg_jobs);
         }
         return;
     }
     if (!(enable & CUP2006_DG_STATUS_DONE)) {
-        cup2006_dbg(s,  "cup2006: 2DG job #%" PRIu64 " done, +0x008=0x%08x"
-                " does not enable bit 0: no INTEVT 0x8c0\n",
-                s->dg_jobs, enable);
+        trace_cup2006_2dg_dg_job_one_x008(s->dg_jobs, enable);
         return;
     }
     if (!src) {
-        cup2006_dbg(s,  "cup2006: 2DG job #%" PRIu64 " done but INTEVT 0x8c0"
-                " has no INTC source\n", s->dg_jobs);
+        trace_cup2006_2dg_dg_job_one_but(s->dg_jobs);
         return;
     }
     if (!src->asserted) {
         sh_intc_toggle_source(src, 0, 1);
         s->dg_irqs++;
-        cup2006_dbg(s,  "cup2006: 2DG INTEVT 0x8c0 raised #%" PRIu64
-                " t=%" PRId64 "ms job#%" PRIu64 " status=0x%08x enable=0x%08x"
-                " list=0x%08x dest=0x%08x\n", s->dg_irqs,
-                qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) - s->draw_t0_ms,
-                s->dg_jobs,
-                s->dg_reg[CUP2006_DG_STATUS >> 2], enable,
-                s->dg_reg[CUP2006_DG_LIST >> 2],
-                s->dg_reg[CUP2006_DG_DEST >> 2]);
+        trace_cup2006_2dg_dg_intevt_x8c0_raised(s->dg_irqs, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) - s->draw_t0_ms, s->dg_jobs, s->dg_reg[CUP2006_DG_STATUS >> 2], enable, s->dg_reg[CUP2006_DG_LIST >> 2], s->dg_reg[CUP2006_DG_DEST >> 2]);
     }
 }
 

@@ -67,10 +67,7 @@ static void cup2006_carsig_sample(Cup2006MachineState *s)
     s->carsig_irq_raised = true;
     if (s->carsig_samples <= 8 ||
         (s->carsig_samples & (s->carsig_samples - 1)) == 0) {
-        cup2006_dbg(s,  "cup2006: CARSIG sample #%" PRIu64
-                " ready: INTEVT 0x%03x (SYSINTR 0x%x)\n",
-                s->carsig_samples, CUP2006_CARSIG_INTEVT,
-                CUP2006_CARSIG_SYSINTR);
+        trace_cup2006_carsig_sample_ready_intevt_sysintr(s->carsig_samples, CUP2006_CARSIG_INTEVT, CUP2006_CARSIG_SYSINTR);
     }
     cup2006_carsig_update_irq(s);
 }

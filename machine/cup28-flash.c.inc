@@ -73,8 +73,7 @@ static void cup28_bksram_init(Cup28MachineState *s)
         if (!st.st_size) {
             memset(memory_region_get_ram_ptr(&s->p28_bksram), 0xff, size);
         }
-        cup28_dbg(s, "cup28: backup SRAM %s '%s'",
-                    st.st_size ? "restored from" : "initialized in", path);
+        trace_cup28_flash_backup_sram(st.st_size ? "restored from" : "initialized in", path);
         return;
 #else
         error_report("cup28: file-backed SRAM requires a POSIX host");

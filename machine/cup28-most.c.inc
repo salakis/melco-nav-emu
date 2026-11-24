@@ -121,7 +121,7 @@ static void cup28_most_receive(Cup28MachineState *s, const uint8_t *message,
         memcpy(s->p28_most_peer_q[i], message, length);
         s->p28_most_peer_q_len[i] = length;
     } else {
-        cup28_dbg(s, "cup28: MOST peer hold-back queue full, message dropped");
+        trace_cup28_most_peer_hold_back_queue();
     }
 }
 
@@ -710,10 +710,10 @@ static bool cup28_most_gps_send(Cup28MachineState *s)
     }
     cup28_most_gps_msg(s, 0x00, rec, sizeof(rec));
     if (s->p28_most_gps_log++ < 3 || valid != s->p28_most_gps_valid) {
-        cup28_dbg(s, "cup28: MOST GPS 52/E00 %s t=%" PRId64 " ms lat=%.6f lon=%.6f",
-                    valid ? "fix" : "no fix", now,
-                    (int32_t)ldl_be_p(rec + 4) * (180.0 / 2147483648.0),
-                    (int32_t)ldl_be_p(rec) * (180.0 / 2147483648.0));
+        /* Trace events take no floats: degrees become micro-degrees. */
+        trace_cup28_most_gps_e00_ms_lat(valid ? "fix" : "no fix", now, (int32_t)lrint((int32_t)ldl_be_p(rec + 4) *
+                                   (180.0 / 2147483648.0) * 1e6), (int32_t)lrint((int32_t)ldl_be_p(rec) *
+                                   (180.0 / 2147483648.0) * 1e6));
     }
     s->p28_most_gps_valid = valid;
     return valid;

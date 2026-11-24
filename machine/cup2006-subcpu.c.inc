@@ -17,10 +17,6 @@ static void cup2006_scif_note(Cup2006MachineState *s, hwaddr phys,
 {
     unsigned i;
 
-    if (!s->verbose) {
-        return;
-    }
-
     for (i = 0; i < s->scif_log_nr; i++) {
         if (s->scif_log[i].addr == phys &&
             s->scif_log[i].is_write == is_write) {
@@ -30,19 +26,14 @@ static void cup2006_scif_note(Cup2006MachineState *s, hwaddr phys,
     if (s->scif_log_nr == CUP2006_SCIF_LOG_MAX) {
         if (!s->scif_log_full_warned) {
             s->scif_log_full_warned = true;
-            cup2006_dbg(s, "cup2006: STUB scif log full (%u addresses);"
-                    " further accesses are not listed\n", CUP2006_SCIF_LOG_MAX);
+            trace_cup2006_subcpu_stub_scif_log_full(CUP2006_SCIF_LOG_MAX);
         }
         return;
     }
     s->scif_log[s->scif_log_nr].addr = phys;
     s->scif_log[s->scif_log_nr].is_write = is_write;
     s->scif_log_nr++;
-    cup2006_dbg(s, "cup2006: STUB scif register 0x%08" PRIx32
-            " (%s, size=%u) value=0x%" PRIx64
-            "; SCFSR +0x010 = 0x%04x (TEND|TDFE) | RDF\n",
-            (uint32_t)phys, is_write ? "write" : "read", size, value,
-            CUP2006_SCIF_SCFSR_RDY);
+    trace_cup2006_subcpu_stub_scif_register_size((uint32_t)phys, is_write ? "write" : "read", size, value, CUP2006_SCIF_SCFSR_RDY);
 }
 
 /* 8-bit reversal, the transform Sub_SCIF applies to every wire byte. */
@@ -409,11 +400,7 @@ static void cup2006_scif0_update_irq(Cup2006MachineState *s)
  */
         cpu_interrupt(first_cpu, CPU_INTERRUPT_HARD);
     }
-    cup2006_info(s, "cup2006: SCIF0 INTEVT 0x%03x %s (SYSINTR %d, %u byte%s"
-                " pending)",
-                CUP2006_SCIF0_INTEVT, want ? "raised" : "released",
-                CUP2006_SCIF0_SYSINTR, cup2006_scif0_rx_count(s),
-                cup2006_scif0_rx_count(s) == 1 ? "" : "s");
+    trace_cup2006_subcpu_scif0_intevt_sysintr_byte(CUP2006_SCIF0_INTEVT, want ? "raised" : "released", CUP2006_SCIF0_SYSINTR, cup2006_scif0_rx_count(s), cup2006_scif0_rx_count(s) == 1 ? "" : "s");
 }
 
 /* End of one transmitted byte: one byte time later the transmit FIFO is
@@ -460,11 +447,7 @@ static uint64_t cup2006_scif0_read(Cup2006MachineState *s, hwaddr base,
             if (cup2006_scif0_rx_count(s) > 0) {
                 byte = s->scif0_rxq[s->scif0_rxq_head++ % CUP2006_SCIF_RXQ];
                 if (s->keys) {
-                    cup2006_info(s, "cup2006: keys: guest read 0x%02x at %" PRId64
-                                " ms pc=0x%08" PRIx32 " (%u left)",
-                                byte, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL),
-                                cup2006_guest_pc(),
-                                cup2006_scif0_rx_count(s));
+                    trace_cup2006_subcpu_keys_guest_read_at(byte, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL), cup2006_guest_pc(), cup2006_scif0_rx_count(s));
                 }
                 cup2006_scif0_update_irq(s);
             }
@@ -548,8 +531,7 @@ static void cup2006_scif0_peer_send(Cup2006MachineState *s, const uint8_t *buf,
 
     for (j = 0; j < n; j++) {
         if (s->peer_q_tail - s->peer_q_head >= CUP2006_SCIF_RXQ) {
-            cup2006_info(s, "cup2006: keys: peer TX queue full, byte 0x%02x lost",
-                        buf[j]);
+            trace_cup2006_subcpu_keys_peer_tx_queue(buf[j]);
             break;
         }
         s->peer_q[s->peer_q_tail++ % CUP2006_SCIF_RXQ] = buf[j];
@@ -606,10 +588,7 @@ static void cup2006_key_put_frame_enc(Cup2006MachineState *s, uint16_t key,
     cup2006_scif0_peer_send(s, frame, len);
     s->key_frames++;
     s->key_frame_ms = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL);
-    cup2006_info(s, "cup2006: keys: key report cmd %04x key 0x%04x type 0x%02x"
-                " val 0x%02x raw %d queued at %" PRId64 " ms (%u bytes)",
-                s->key_src, (unsigned)key, type, val, raw, s->key_frame_ms,
-                len);
+    trace_cup2006_subcpu_keys_key_report_cmd(s->key_src, (unsigned)key, type, val, raw, s->key_frame_ms, len);
 }
 
 /* Wheel pulses: Navi's distance pulses arrive as Sub-CPU frames, command
@@ -648,8 +627,7 @@ static void cup2006_wheel_put_frame(Cup2006MachineState *s, int16_t pulses)
     s->wheel_frames++;
     s->key_last_wheel = true;
     if (s->wheel_frames <= 3 || (s->wheel_frames % 600) == 0) {
-        cup2006_dbg(s,  "cup2006: wheel frame #%" PRIu64 " 0285 pulses %d\n",
-                s->wheel_frames, pulses);
+        trace_cup2006_subcpu_wheel_frame_pulses(s->wheel_frames, pulses);
     }
 }
 
@@ -686,9 +664,7 @@ static void cup2006_status_put_frame(Cup2006MachineState *s, unsigned code)
     cup2006_scif0_peer_send(s, f, 7 + n);
     s->key_frames++;
     s->key_last_wheel = false;
-    cup2006_info(s, "cup2006: subpeer: status frame %02x %02x (%u data byte(s))"
-                " sent at %" PRId64 " ms", f[2], f[3], n,
-                qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+    trace_cup2006_subcpu_subpeer_status_frame_data(f[2], f[3], n, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
 }
 
 static void cup2006_key_put_frame(Cup2006MachineState *s)
@@ -752,9 +728,7 @@ static void cup2006_key_guest_tx(Cup2006MachineState *s, uint8_t b)
         if (s->key_last_wheel) {
             return;
         }
-        cup2006_info(s, "cup2006: keys: guest ACKed key report #%u (%u ack%s"
-                    " since the report)", s->key_frames, s->key_guest_acks,
-                    s->key_guest_acks == 1 ? "" : "s");
+        trace_cup2006_subcpu_keys_guest_acked_key(s->key_frames, s->key_guest_acks, s->key_guest_acks == 1 ? "" : "s");
         return;
     }
     if (!s->keys) {
@@ -812,18 +786,12 @@ static void cup2006_subpeer_report(Cup2006MachineState *s, const char *what)
     char hex[3 * CUP2006_SCIF_RXQ + 1];
     unsigned i, off = 0;
 
-    if (!s->verbose) {
-        return;
-    }
-
     hex[0] = '\0';
     for (i = 0; i < s->subpeer_frame_len && off + 4 < sizeof(hex); i++) {
         off += snprintf(hex + off, sizeof(hex) - off, "%02x ",
                         s->subpeer_frame[i]);
     }
-    cup2006_info(s, "cup2006: subpeer: %s frame %s(%u bytes) at %" PRId64 " ms"
-                " pc=0x%08" PRIx32, what, hex, s->subpeer_frame_len,
-                qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL), cup2006_guest_pc());
+    trace_cup2006_subcpu_subpeer_frame_bytes_at(what, hex, s->subpeer_frame_len, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL), cup2006_guest_pc());
 }
 
 static void cup2006_subpeer_ack(Cup2006MachineState *s)
@@ -883,10 +851,7 @@ static void cup2006_subpeer_reply_arm(Cup2006MachineState *s)
     }
     cup2006_scif0_peer_send(s, &enq, 1);
     s->subpeer_reply_armed = true;
-    cup2006_info(s, "cup2006: subpeer: peer ENQ 0x05 for the known %02x %02x"
-                " reply at %" PRId64 " ms, frame follows the guest's 0x06",
-                s->subpeer_reply_code, s->subpeer_reply_code1,
-                qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+    trace_cup2006_subcpu_subpeer_peer_enq_x05(s->subpeer_reply_code, s->subpeer_reply_code1, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
 }
 
 /* Ignition-off, second frame: after NET OFF the peer reports DeviceMode
@@ -921,10 +886,7 @@ static void cup2006_subpeer_reply_send(Cup2006MachineState *s)
     s->subpeer_reply_armed = false;
     s->subpeer_reply_pending = false;
     cup2006_subpeer_car_next(s, sent);
-    cup2006_info(s, "cup2006: subpeer: known reply frame %02x %02x %02x %02x %02x"
-                " %02x %02x (%u bytes) sent at %" PRId64 " ms",
-                frame[0], frame[1], frame[2], frame[3], frame[4], frame[5],
-                frame[6], n, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+    trace_cup2006_subcpu_subpeer_known_reply_frame(frame[0], frame[1], frame[2], frame[3], frame[4], frame[5], frame[6], n, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
 }
 
 static void cup2006_subpeer_guest_tx(Cup2006MachineState *s, uint8_t b)
@@ -954,8 +916,7 @@ static void cup2006_subpeer_guest_tx(Cup2006MachineState *s, uint8_t b)
             s->subpeer_frame[1] = b;
             s->subpeer_frame_len = 2;
             if (b < 2 || (unsigned)b + 2 > CUP2006_SCIF_RXQ) {
-                cup2006_info(s, "cup2006: subpeer: guest frame LEN 0x%02x is out"
-                            " of range, refused with 0x15", b);
+                trace_cup2006_subcpu_subpeer_guest_frame_len(b);
                 cup2006_subpeer_reset(s);
                 {
                     static const uint8_t nak = 0x15;
@@ -979,11 +940,7 @@ static void cup2006_subpeer_guest_tx(Cup2006MachineState *s, uint8_t b)
         }
         if (s->subpeer_frame[total - 2] != 0x03 ||
             s->subpeer_frame[total - 1] != sum) {
-            cup2006_info(s, "cup2006: subpeer: guest frame failed the parser"
-                        " checks (ETX 0x%02x, CS 0x%02x, expected 0x%02x),"
-                        " refused with 0x15",
-                        s->subpeer_frame[total - 2],
-                        s->subpeer_frame[total - 1], sum);
+            trace_cup2006_subcpu_subpeer_guest_frame_failed(s->subpeer_frame[total - 2], s->subpeer_frame[total - 1], sum);
             cup2006_subpeer_report(s, "bad");
             cup2006_subpeer_reset(s);
             {
@@ -1003,9 +960,7 @@ static void cup2006_subpeer_guest_tx(Cup2006MachineState *s, uint8_t b)
         if (car_answers) {
             s->car_voice_reply[0] = s->subpeer_frame[5];
             s->car_voice_reply[1] = 0x01;
-            cup2006_info(s, "cup2006: car: voice channel request %02x %02x ->"
-                        " f3 81 %02x 01", s->subpeer_frame[5],
-                        s->subpeer_frame[6], s->subpeer_frame[5]);
+            trace_cup2006_subcpu_car_voice_channel_request(s->subpeer_frame[5], s->subpeer_frame[6], s->subpeer_frame[5]);
             cup2006_key_enqueue(s, CUP2006_STATUS_FLAG | 0xf381, false);
         }
         if (s->subpeer_acc_off_stage == 2 && total >= 8 &&
@@ -1025,14 +980,12 @@ static void cup2006_subpeer_guest_tx(Cup2006MachineState *s, uint8_t b)
             s->subpeer_reply_seq = 0x00;    /* STUB: the reply seq byte is 0x00 */
             s->subpeer_reply_data_len = 0;
             s->subpeer_reply_pending = true;
-            cup2006_info(s, "cup2006: subpeer: f5 01 05 takes the known reply"
-                        " fd 83; offering the"
-                        " peer ENQ after this ACK");
+            trace_cup2006_subcpu_subpeer_f5_takes_the();
         } else if (s->subpeer_frame_total >= 4 &&
                    s->subpeer_frame[2] == 0xf1 && s->subpeer_frame[3] == 0x05) {
             /* f1 05's reply code is f1 85, but no reply data is known and a
              * data-less reply makes the guest repeat the request: ACK only. */
-            cup2006_info(s, "cup2006: subpeer: f1 05 is ACKed without a reply");
+            trace_cup2006_subcpu_subpeer_f1_is_acked();
         } else if (s->subpeer_frame_total >= 4 &&
                    s->subpeer_frame[2] == 0xf2 && s->subpeer_frame[3] == 0x09) {
             s->subpeer_reply_code = 0xf2;
@@ -1040,8 +993,7 @@ static void cup2006_subpeer_guest_tx(Cup2006MachineState *s, uint8_t b)
             s->subpeer_reply_seq = 0x00;    /* STUB: the reply seq byte is 0x00 */
             s->subpeer_reply_data_len = 0;
             s->subpeer_reply_pending = true;
-            cup2006_info(s, "cup2006: subpeer: f2 09 takes the known reply"
-                        " f2 89; offering the peer ENQ after this ACK");
+            trace_cup2006_subcpu_subpeer_f2_takes_the();
         /* `f2 02` (Sub-CPU firmware check) -> `f2 82` by the same
          * request|0x80 rule as f2 09 -> f2 89; seq 0x00, no data. */
         } else if (s->subpeer_frame_total >= 4 &&
@@ -1051,9 +1003,7 @@ static void cup2006_subpeer_guest_tx(Cup2006MachineState *s, uint8_t b)
             s->subpeer_reply_seq = 0x00;    /* STUB: the reply seq byte is 0x00 */
             s->subpeer_reply_data_len = 0;
             s->subpeer_reply_pending = true;
-            cup2006_info(s, "cup2006: subpeer: f2 02 takes the known reply"
-                        " f2 82;"
-                        " offering the peer ENQ after this ACK");
+            trace_cup2006_subcpu_subpeer_f2_takes_the_2();
         /* `fd 04 06` -> `fd 84`, the same row-pair rule as `f5 01 05` ->
          * `fd 83`; seq 0x00 (STUB) and no data bytes (the decoder's minimum
          * payload is `<code:2> <seq>`). */
@@ -1065,17 +1015,13 @@ static void cup2006_subpeer_guest_tx(Cup2006MachineState *s, uint8_t b)
             s->subpeer_reply_seq = 0x00;    /* STUB: the reply seq byte is 0x00 */
             s->subpeer_reply_data_len = 0;
             s->subpeer_reply_pending = true;
-            cup2006_info(s, "cup2006: subpeer: fd 04 06 takes the known reply"
-                        " fd 84; offering the"
-                        " peer ENQ after this ACK");
+            trace_cup2006_subcpu_subpeer_fd_takes_the();
         } else if (s->subpeer_frame_total >= 5 && !car_answers) {
-            cup2006_info(s, "cup2006: subpeer: cmd %02x%02x has no known reply,"
-                        " ACK only", s->subpeer_frame[2], s->subpeer_frame[3]);
+            trace_cup2006_subcpu_subpeer_cmd_has_no(s->subpeer_frame[2], s->subpeer_frame[3]);
         }
         cup2006_subpeer_reset(s);
         cup2006_subpeer_ack(s);
-        cup2006_info(s, "cup2006: subpeer: ACK 0x06 sent for guest frame #%u",
-                    s->subpeer_frames);
+        trace_cup2006_subcpu_subpeer_ack_x06_sent(s->subpeer_frames);
         cup2006_subpeer_reply_arm(s);
         return;
     }
@@ -1093,9 +1039,7 @@ static void cup2006_subpeer_guest_tx(Cup2006MachineState *s, uint8_t b)
             s->subpeer_reply_code1 = 0x82;
             s->subpeer_reply_seq = 0x00;   /* STUB: no row gives the seq */
             s->subpeer_reply_data_len = 0;
-            cup2006_info(s, "cup2006: subpeer: startup status report f9 82"
-                        " queued on the guest's first ENQ at %" PRId64 " ms",
-                        qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+            trace_cup2006_subcpu_subpeer_startup_status_report(qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
             s->subpeer_reply_pending = true;
         }
         if (s->subpeer_reply_pending && s->subpeer_enq_acked) {
@@ -1109,25 +1053,17 @@ static void cup2006_subpeer_guest_tx(Cup2006MachineState *s, uint8_t b)
              * with 0x15; ACK it instead so its cycle completes. */
             s->subpeer_enq_acked = true;
             cup2006_subpeer_grant(s);
-            cup2006_info(s, "cup2006: subpeer: guest ENQ ACKed with a reply"
-                        " %02x %02x pending at %" PRId64 " ms",
-                        s->subpeer_reply_code, s->subpeer_reply_code1,
-                        qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+            trace_cup2006_subcpu_subpeer_guest_enq_acked(s->subpeer_reply_code, s->subpeer_reply_code1, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
             return;
         }
         s->subpeer_polls++;
         cup2006_subpeer_grant(s);
-        cup2006_info(s, "cup2006: subpeer: guest ENQ 0x%02x #%u answered with"
-                    " ACK 0x06 at %" PRId64 " ms pc=0x%08" PRIx32,
-                    b, s->subpeer_polls,
-                    qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL),
-                    cup2006_guest_pc());
+        trace_cup2006_subcpu_subpeer_guest_enq_answered(b, s->subpeer_polls, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL), cup2006_guest_pc());
         return;
     }
     if (b == 0x06) {
         s->subpeer_acks++;
-        cup2006_info(s, "cup2006: subpeer: guest ACK 0x06 #%u at %" PRId64 " ms",
-                    s->subpeer_acks, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+        trace_cup2006_subcpu_subpeer_guest_ack_x06(s->subpeer_acks, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
         return;
     }
     if (b == 0x15) {
@@ -1136,14 +1072,10 @@ static void cup2006_subpeer_guest_tx(Cup2006MachineState *s, uint8_t b)
             s->subpeer_reply_armed = false;   /* keep pending, retry on ENQ */
             s->subpeer_enq_acked = false;     /* re-learn the guest's state */
         }
-        cup2006_info(s, "cup2006: subpeer: guest NAK 0x15 #%u (its collision"
-                    " guard / parser refusal) at %" PRId64 " ms",
-                    s->subpeer_naks, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+        trace_cup2006_subcpu_subpeer_guest_nak_x15(s->subpeer_naks, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
         return;
     }
-    cup2006_info(s, "cup2006: subpeer: unexpected guest byte 0x%02x at %" PRId64
-                " ms pc=0x%08" PRIx32, b,
-                qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL), cup2006_guest_pc());
+    trace_cup2006_subcpu_subpeer_unexpected_guest_byte(b, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL), cup2006_guest_pc());
 }
 
 /* Start the peer's transfer for a latched key (driven by the input event). */
@@ -1158,9 +1090,7 @@ static void cup2006_key_start(Cup2006MachineState *s)
         cup2006_scif0_peer_send(s, &enq, 1);
         s->peer_enq_armed = true;
             s->peer_enq_ms = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL);
-        cup2006_info(s, "cup2006: keys: peer ENQ 0x05 sent at %" PRId64 " ms, the"
-                    " frame follows the guest's 0x06",
-                    qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+        trace_cup2006_subcpu_keys_peer_enq_x05(qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
     } else if (s->key_seq == 0) {
         static const uint8_t ack = 0x06;
 
@@ -1184,9 +1114,7 @@ static void cup2006_key_pump(void *opaque)
     if (s->peer_enq_armed && now - s->peer_enq_ms > 1000 &&
         s->peer_enq_stall_logged != s->peer_enq_ms) {
         s->peer_enq_stall_logged = s->peer_enq_ms;
-        cup2006_info(s, "cup2006: keys: peer ENQ sent at %" PRId64 " ms is still"
-                    " unanswered at %" PRId64 " ms (link stalled)",
-                    s->peer_enq_ms, now);
+        trace_cup2006_subcpu_keys_peer_enq_sent(s->peer_enq_ms, now);
     }
     if (s->peer_enq_armed || s->key_frame_inflight ||
         (!s->key_q_n && s->key_waiting < 0)) {
@@ -1215,9 +1143,7 @@ static void cup2006_key_pump(void *opaque)
         s->key_q_n--;
     }
     if (s->key_waiting < CUP2006_WHEEL_FLAG) {
-        cup2006_info(s, "cup2006: keys: guest key 0x%02x (raw %d) latched for the"
-                    " next SCIF0 poll (%u queued)", s->key_waiting,
-                    s->key_waiting_raw, s->key_q_n);
+        trace_cup2006_subcpu_keys_guest_key_raw(s->key_waiting, s->key_waiting_raw, s->key_q_n);
     }
     cup2006_key_start(s);
 }
@@ -1229,7 +1155,7 @@ static void cup2006_key_enqueue(Cup2006MachineState *s, int code, bool raw)
     /* Reserve the last queue slot for the raw no-key report. Losing that
      * report leaves the guest's real held-key/repeat state active. */
     if (s->key_q_n >= 15 && !(raw && code == 0)) {
-        cup2006_info(s, "cup2006: keys: queue full, 0x%02x dropped", code);
+        trace_cup2006_subcpu_keys_queue_full_dropped(code);
         return;
     }
     if (s->key_q_n == 16) {
@@ -1324,10 +1250,7 @@ static void cup2006_power_pulse(void *opaque)
         s->power_irq_raised = true;
         s->power_irq_raises++;
         cpu_interrupt(first_cpu, CPU_INTERRUPT_HARD);
-        cup2006_info(s, "cup2006: power: INTEVT 0x%03x pulse #%" PRIu64
-                    " (SYSINTR 0x%x, acc %s)", CUP2006_POWER_INTEVT,
-                    s->power_irq_raises, CUP2006_POWER_SYSINTR,
-                    s->acc_on ? "on" : "off");
+        trace_cup2006_subcpu_power_intevt_pulse_sysintr(CUP2006_POWER_INTEVT, s->power_irq_raises, CUP2006_POWER_SYSINTR, s->acc_on ? "on" : "off");
     }
     timer_mod(s->power_drop_timer,
               qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + 2);
@@ -1349,8 +1272,7 @@ static void cup2006_subpeer_queue_acc_off(Cup2006MachineState *s)
     }
     s->subpeer_acc_off_stage = 1;
     cup2006_key_enqueue(s, CUP2006_STATUS_FLAG | 0xf18a, false);
-    cup2006_info(s, "cup2006: subpeer: ACC-off queues f1 8a 02 (MOST NetService"
-                " NET OFF), then fc 81 01");
+    trace_cup2006_subcpu_subpeer_acc_off_queues();
 }
 
 /* Ignition-off, last step: the Sub-CPU removes the SH's power once the
@@ -1369,9 +1291,7 @@ static void cup2006_power_cut_tick(void *opaque)
         timer_mod(s->power_cut_timer, now + 500);
         return;
     }
-    cup2006_info(s, "cup2006: power: Sub-CPU cuts power at %" PRId64 " ms (guest"
-                " shut down at %" PRId64 " ms, last flash write %" PRId64
-                " ms)", now, s->power_cut_armed_ms, s->drf_activity_ms);
+    trace_cup2006_subcpu_power_sub_cpu_cuts(now, s->power_cut_armed_ms, s->drf_activity_ms);
     qemu_system_shutdown_request(SHUTDOWN_CAUSE_GUEST_SHUTDOWN);
 }
 
@@ -1384,8 +1304,7 @@ static void cup2006_power_cut_arm(Cup2006MachineState *s)
     s->power_cut_timer = timer_new_ms(QEMU_CLOCK_VIRTUAL,
                                       cup2006_power_cut_tick, s);
     timer_mod(s->power_cut_timer, s->power_cut_armed_ms + 500);
-    cup2006_info(s, "cup2006: power: guest reports DeviceMode Shutdown (fc 01 01);"
-                " power goes once its flash writes are done");
+    trace_cup2006_subcpu_power_guest_reports_devicemode();
 }
 
 static void cup2006_power_start(Cup2006MachineState *s)
@@ -1396,8 +1315,7 @@ static void cup2006_power_start(Cup2006MachineState *s)
     /* The application-layer notification is independent of the INTC stub. */
     cup2006_subpeer_queue_acc_off(s);
     if (!s->power_src_ready) {
-        cup2006_info(s, "cup2006: power: F12 ignored, the power INTEVT source"
-                    " is not available");
+        trace_cup2006_subcpu_power_f12_ignored_the();
         return;
     }
     s->power_pulses = 8;
@@ -1464,8 +1382,7 @@ static void cup2006_key_input(DeviceState *dev, QemuConsole *src,
         return;
     }
     s->key_ms = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL);
-    cup2006_info(s, "cup2006: keys: qcode %s down at %" PRId64 " ms", e->name,
-                s->key_ms);
+    trace_cup2006_subcpu_keys_qcode_down_at(e->name, s->key_ms);
     /* A key with a known raw byte is reported on the raw 0181 lane; the
      * others keep the E2 form. */
     cup2006_key_enqueue(s, e->raw >= 0 ? e->raw : e->code, e->raw >= 0);

@@ -35,6 +35,13 @@ def test_key_transactions_keep_release_and_wait_for_frame_ack(tmp_path):
 #define QEMU_CLOCK_VIRTUAL 0
 #define cup2006_info(...) ((void)0)
 #define cup2006_dbg(...) ((void)0)
+/* the board logs through trace events now; stub the ones these bodies call */
+#define trace_cup2006_subcpu_keys_guest_acked_key(...) ((void)0)
+#define trace_cup2006_subcpu_keys_peer_enq_x05(...) ((void)0)
+#define trace_cup2006_subcpu_keys_guest_key_raw(...) ((void)0)
+#define trace_cup2006_subcpu_keys_peer_enq_sent(...) ((void)0)
+#define trace_cup2006_subcpu_keys_queue_full_dropped(...) ((void)0)
+#define trace_cup2006_subcpu_subpeer_status_frame_data(...) ((void)0)
 #define PRId64 "lld"
 typedef struct { DECLARATIONS } Cup2006MachineState;
 static int offers, frames, last_key, scheduled, last_status;
@@ -166,6 +173,13 @@ def test_car_voice_grant_frame_passes_sub1_parser(tmp_path):
 #define PRId64 "lld"
 #define cup2006_info(...) ((void)0)
 #define cup2006_dbg(...) ((void)0)
+/* the board logs through trace events now; stub the ones these bodies call */
+#define trace_cup2006_subcpu_keys_guest_acked_key(...) ((void)0)
+#define trace_cup2006_subcpu_keys_peer_enq_x05(...) ((void)0)
+#define trace_cup2006_subcpu_keys_guest_key_raw(...) ((void)0)
+#define trace_cup2006_subcpu_keys_peer_enq_sent(...) ((void)0)
+#define trace_cup2006_subcpu_keys_queue_full_dropped(...) ((void)0)
+#define trace_cup2006_subcpu_subpeer_status_frame_data(...) ((void)0)
 typedef struct { int car_market; uint8_t car_voice_reply[2]; int key_frames;
                  bool key_last_wheel; } Cup2006MachineState;
 static uint8_t out[32]; static unsigned out_n;

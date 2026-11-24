@@ -21,10 +21,6 @@ static void cup2006_rcd_note(Cup2006MachineState *s, hwaddr phys,
 {
     unsigned i;
 
-    if (!s->verbose) {
-        return;
-    }
-
     s->rcd_accesses++;
     for (i = 0; i < s->rcd_log_nr; i++) {
         if (s->rcd_log[i].addr == phys &&
@@ -38,9 +34,7 @@ static void cup2006_rcd_note(Cup2006MachineState *s, hwaddr phys,
     s->rcd_log[s->rcd_log_nr].addr = phys;
     s->rcd_log[s->rcd_log_nr].is_write = is_write;
     s->rcd_log_nr++;
-    cup2006_dbg(s, "cup2006: STUB rcd register 0x%08" PRIx32
-            " (%s, size=%u) value=0x%" PRIx64 "\n",
-            (uint32_t)phys, is_write ? "write" : "read", size, value);
+    trace_cup2006_rcd_gpio_stub_rcd_register_size((uint32_t)phys, is_write ? "write" : "read", size, value);
 }
 
 static uint64_t cup2006_rcd_read(Cup2006MachineState *s, hwaddr base,
@@ -134,10 +128,6 @@ static void cup2006_gpio_note(Cup2006MachineState *s, hwaddr phys,
 {
     unsigned i;
 
-    if (!s->verbose) {
-        return;
-    }
-
     for (i = 0; i < s->gpio_log_nr; i++) {
         if (s->gpio_log[i].addr == phys &&
             s->gpio_log[i].is_write == is_write) {
@@ -147,19 +137,14 @@ static void cup2006_gpio_note(Cup2006MachineState *s, hwaddr phys,
     if (s->gpio_log_nr == CUP2006_GPIO_LOG_MAX) {
         if (!s->gpio_log_full_warned) {
             s->gpio_log_full_warned = true;
-            cup2006_dbg(s, "cup2006: STUB gpio log full (%u addresses);"
-                    " further accesses are not listed\n", CUP2006_GPIO_LOG_MAX);
+            trace_cup2006_rcd_gpio_stub_gpio_log_full(CUP2006_GPIO_LOG_MAX);
         }
         return;
     }
     s->gpio_log[s->gpio_log_nr].addr = phys;
     s->gpio_log[s->gpio_log_nr].is_write = is_write;
     s->gpio_log_nr++;
-    cup2006_dbg(s, "cup2006: STUB gpio register 0x%08" PRIx32
-            " (%s, size=%u) value=0x%" PRIx64
-            "; HDD power-good = port %d bit %d\n",
-            (uint32_t)phys, is_write ? "write" : "read", size, value,
-            CUP2006_GPIO_HDD_PORT, CUP2006_GPIO_HDD_BIT);
+    trace_cup2006_rcd_gpio_stub_gpio_register_size((uint32_t)phys, is_write ? "write" : "read", size, value, CUP2006_GPIO_HDD_PORT, CUP2006_GPIO_HDD_BIT);
 }
 
 static uint64_t cup2006_gpio_read(Cup2006MachineState *s, hwaddr base,

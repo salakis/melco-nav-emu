@@ -22,6 +22,7 @@
 #include "hw/core/cpu.h"
 #include "hw/sh4/sh.h"
 #include "migration/blocker.h"
+#include "trace.h"
 #include "system/address-spaces.h"
 #include "system/memory.h"
 #include "system/physmem.h"
@@ -52,7 +53,6 @@ struct Cup28MachineState {
     MachineState parent_obj;
 
     bool powered;
-    bool verbose;
     char *dvdimage, *drfimage, *sramsave, *gpstrack;
     Error *migration_blocker;
     MemoryRegion ram, drf_regs, drf_alias_regs;
@@ -189,14 +189,6 @@ static void cup28_register_write(uint8_t *regs, hwaddr addr, uint64_t value,
         regs[addr + i] = value >> (8 * i);
     }
 }
-
-/* Device logging, off by default (verbose=on).  Guest-visible behaviour does
- * not depend on it; every call site has the state pointer s in scope. */
-#define cup28_dbg(s, ...) do {                  \
-        if ((s)->verbose) {                     \
-            info_report(__VA_ARGS__);           \
-        }                                       \
-    } while (0)
 
 #include "cup28-track.c.inc" 
 #include "cup28-rtc.c.inc"
@@ -510,16 +502,6 @@ static void cup28_finalize(Object *obj)
     g_clear_pointer(&s->track, g_array_unref);
 }
 
-static bool cup28_get_verbose(Object *obj, Error **errp)
-{
-    return CUP28_MACHINE(obj)->verbose;
-}
-
-static void cup28_set_verbose(Object *obj, bool value, Error **errp)
-{
-    CUP28_MACHINE(obj)->verbose = value;
-}
-
 static void cup28_class_init(ObjectClass *oc, const void *data)
 {
     MachineClass *mc = MACHINE_CLASS(oc);
@@ -544,10 +526,6 @@ static void cup28_class_init(ObjectClass *oc, const void *data)
     object_class_property_add_str(oc, "gpstrack", cup28_get_gpstrack,
                                   cup28_set_gpstrack);
     object_class_property_set_description(oc, "gpstrack", "GPS and sensor track CSV");
-    object_class_property_add_bool(oc, "verbose",
-                                   cup28_get_verbose, cup28_set_verbose);
-    object_class_property_set_description(oc, "verbose",
-        "log device activity (MOST GPS, DVD, audio DMA, flash) on stderr");
 }
 
 static const TypeInfo cup28_types[] = {

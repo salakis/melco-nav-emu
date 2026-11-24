@@ -22,9 +22,7 @@ static void cup2006_dvd5_irq_next(Cup2006MachineState *s)
  */
         s->dvd5_irq_blocked++;
         if (s->dvd5_irq_blocked <= 4) {
-            cup2006_dbg(s,  "cup2006: dvd5 INTEVT 0x%03x not raised:"
-                    " INTC2 0xFFE00044 bit 28 clear (enabled=0x%08x)\n",
-                    CUP2006_DVD5_INTEVT, s->intc2_enabled);
+            trace_cup2006_dvd_dvd5_intevt_not_raised(CUP2006_DVD5_INTEVT, s->intc2_enabled);
         }
         return;
     }
@@ -40,12 +38,7 @@ static void cup2006_dvd5_irq_next(Cup2006MachineState *s)
         cpu_interrupt(first_cpu, CPU_INTERRUPT_HARD);
         s->dvd5_irqs++;
         if (s->dvd5_irqs <= 32) {
-            cup2006_dbg(s,  "cup2006: dvd5 INTEVT 0x%03x raised #%" PRIu64
-                    " byte=%02x (%u/%u) pc=0x%08x t=%" PRId64 "ms\n",
-                    CUP2006_DVD5_INTEVT, s->dvd5_irqs,
-                    s->dvd5_rx[s->dvd5_rx_pos], s->dvd5_rx_pos + 1,
-                    s->dvd5_rx_len, cup2006_guest_pc(),
-                    qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+            trace_cup2006_dvd_dvd5_intevt_raised_byte(CUP2006_DVD5_INTEVT, s->dvd5_irqs, s->dvd5_rx[s->dvd5_rx_pos], s->dvd5_rx_pos + 1, s->dvd5_rx_len, cup2006_guest_pc(), qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
         }
     }
 }
@@ -82,8 +75,7 @@ static void cup2006_dvd5_spinup(Cup2006MachineState *s)
     }
     s->dvd5_rx_pos = 0;
     s->dvd5_rx_unsol = true;
-    cup2006_dbg(s,  "cup2006: STUB dvd5 spin-up: unsolicited B1 %02x %02x %02x"
-            " (DVD-ROM ready)\n", b1[1], b1[2], b1[3]);
+    trace_cup2006_dvd_stub_dvd5_spin_up(b1[1], b1[2], b1[3]);
 }
 
 /*
@@ -111,9 +103,7 @@ static void cup2006_dvd5_status_b1(Cup2006MachineState *s, uint8_t st,
     s->dvd5_rx_len = left + sizeof(b1);
     s->dvd5_rx_pos = 0;
     s->dvd5_rx_unsol = true;
-    cup2006_info(s, "cup2006: drive: %s, unsolicited B1 %02x %02x %02x at %" PRId64
-                " ms", what, st, qual, type,
-                qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+    trace_cup2006_dvd_drive_unsolicited_b1_at(what, st, qual, type, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
     cup2006_dvd5_irq_next(s);
 }
 
@@ -141,8 +131,7 @@ static void cup2006_dvd_insert(void *opaque)
     s->dvd_size = lseek(s->dvd_fd, 0, SEEK_END);
     g_free(s->dvdimage);
     s->dvdimage = g_strdup(path);
-    cup2006_info(s, "cup2006: drive: disc '%s' inserted (%" PRIu64 " bytes)",
-                path, s->dvd_size);
+    trace_cup2006_dvd_drive_disc_inserted_bytes(path, s->dvd_size);
     s->dvd5_ejected = false;
     s->dvd5_disc_ready = false;
     cup2006_dvd5_status_b1(s, 0xb0, 0x20, 0x00, "loading");
@@ -158,9 +147,7 @@ static void cup2006_dvd_insert(void *opaque)
 static void cup2006_dvd_shutter_key(Cup2006MachineState *s)
 {
     s->dvd_shutter_open = !s->dvd_shutter_open;
-    cup2006_info(s, "cup2006: drive: shutter %s at %" PRId64 " ms",
-                s->dvd_shutter_open ? "opened" : "closed",
-                qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+    trace_cup2006_dvd_drive_shutter_at_ms(s->dvd_shutter_open ? "opened" : "closed", qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
 }
 
 /* F11: eject button / hand at the slot (host input only): loaded -> eject
@@ -178,8 +165,7 @@ static void cup2006_dvd_eject_button(Cup2006MachineState *s)
         s->dvd5_spinup_pending = false;
         cup2006_dvd5_status_b1(s, 0x90, 0x00, 0x00, "eject button");
     } else if (s->dvd_fd >= 0) {
-        cup2006_info(s, "cup2006: drive: disc '%s' taken from the slot",
-                    s->dvdimage);
+        trace_cup2006_dvd_drive_disc_taken_from(s->dvdimage);
         qemu_close(s->dvd_fd);
         s->dvd_fd = -1;
         s->dvd_size = 0;
@@ -204,9 +190,7 @@ static void cup2006_dvd5_irq_ack(Cup2006MachineState *s)
     }
     s->dvd5_irq_acks++;
     if (s->dvd5_irq_acks <= 32) {
-        cup2006_dbg(s,  "cup2006: dvd5 INTEVT 0x%03x acked #%" PRIu64
-                " pc=0x%08x (%u/%u)\n", CUP2006_DVD5_INTEVT, s->dvd5_irq_acks,
-                cup2006_guest_pc(), s->dvd5_rx_pos, s->dvd5_rx_len);
+        trace_cup2006_dvd_dvd5_intevt_acked(CUP2006_DVD5_INTEVT, s->dvd5_irq_acks, cup2006_guest_pc(), s->dvd5_rx_pos, s->dvd5_rx_len);
     }
     if (s->dvd5_spinup_pending && s->dvd5_rx_pos >= s->dvd5_rx_len) {
         cup2006_dvd5_spinup(s);
@@ -235,9 +219,7 @@ static void cup2006_dvd5_read_sectors(Cup2006MachineState *s, uint32_t lba,
     }
     if (len == 0 || len > CUP2006_DVD_MAX_XFER || dest >= ram_size ||
         len > ram_size - dest) {
-        cup2006_dbg(s,  "cup2006: STUB dvd5 b8 93 read #%" PRIu64
-                " rejected lba=0x%x sectors=0x%x dest=0x%08x units=0x%" PRIx64
-                "\n", s->dvd5_reads, lba, sectors, dest, units);
+        trace_cup2006_dvd_stub_dvd5_b8_read(s->dvd5_reads, lba, sectors, dest, units);
         return;
     }
     buf = g_malloc0(len);
@@ -256,10 +238,7 @@ static void cup2006_dvd5_read_sectors(Cup2006MachineState *s, uint32_t lba,
     physical_memory_write(dest, buf, len);
     g_free(buf);
     if (s->dvd5_reads <= 64) {
-        cup2006_dbg(s,  "cup2006: STUB dvd5 b8 93 read #%" PRIu64 " lba=0x%x"
-                " sectors=0x%x -> dest=0x%08x len=0x%" PRIx64
-                " image_bytes=%zu\n", s->dvd5_reads, lba, sectors, dest, len,
-                got);
+        trace_cup2006_dvd_stub_dvd5_b8_read_2(s->dvd5_reads, lba, sectors, dest, len, got);
     }
     if (s->dvd5_dma_src && !s->dvd5_dma_src->asserted) {
         s->dvd5_dma_src->prio = CUP2006_DVD5_DMA_INTC_PRIO;
@@ -402,7 +381,7 @@ static void cup2006_dvd5_reply(Cup2006MachineState *s, const uint8_t *req,
     s->dvd5_rx_unsol = false;
     cup2006_dvd5_irq_next(s);
     if (s->dvd5_replies <= 32 ||
-        (s->verbose && !(req[0] == 0xb8 && req[1] == 0x93))) {
+        !(req[0] == 0xb8 && req[1] == 0x93)) {
         char reqstr[3 * 24 + 1];
         char rplstr[3 * 8 + 1];
         unsigned i, n;
@@ -415,11 +394,7 @@ static void cup2006_dvd5_reply(Cup2006MachineState *s, const uint8_t *req,
         for (i = 0; i < 8; i++) {
             n += snprintf(rplstr + n, sizeof(rplstr) - n, "%02x", reply[i]);
         }
-        cup2006_dbg(s,  "cup2006: STUB dvd5 exchange %" PRIu64
-                " req=%s len=%u -> reply=%s reply_pa=0x%08" HWADDR_PRIx
-                " pc=0x%08x b893=%" PRIu64 "\n",
-                s->dvd5_replies, reqstr, len, rplstr, pa,
-                cup2006_guest_pc(), s->dvd5_reads);
+        trace_cup2006_dvd_stub_dvd5_exchange_req(s->dvd5_replies, reqstr, len, rplstr, pa, cup2006_guest_pc(), s->dvd5_reads);
     }
 }
 
@@ -431,9 +406,7 @@ static void cup2006_dvd5_doorbell(Cup2006MachineState *s)
     memcpy(req, s->dvd5_req, sizeof(req));
     len = cup2006_reg32_read(s->dvd5_req, 0x40, 4);
     if (len == 0 || len > sizeof(req) || req[0] < 0xb8 || req[0] > 0xbf) {
-        cup2006_dbg(s,
-                      "cup2006: dvd5 doorbell without a frame"
-                      " (first=%02x len=%u)\n", req[0], len);
+        trace_cup2006_dvd_dvd5_doorbell_without_frame(req[0], len);
         return;
     }
     cup2006_dvd5_reply(s, req, len);
@@ -444,10 +417,7 @@ static uint64_t cup2006_dvd5_read(void *opaque, hwaddr addr, unsigned size)
     Cup2006MachineState *s = opaque;
     uint32_t value = cup2006_reg32_read(s->dvd5_reg, addr, size);
 
-    cup2006_dbg(s,
-                  "cup2006: dvd5 read  pc=0x%08" PRIx32
-                  " addr=0x%08" HWADDR_PRIx " size=%u value=0x%x\n",
-                  cup2006_guest_pc(), CUP2006_DVD5_BASE + addr, size, value);
+    trace_cup2006_dvd_dvd5_read_pc_addr(cup2006_guest_pc(), CUP2006_DVD5_BASE + addr, size, value);
     return value;
 }
 
@@ -459,11 +429,7 @@ static void cup2006_dvd5_write(void *opaque, hwaddr addr, uint64_t value,
     Cup2006MachineState *s = opaque;
 
     cup2006_reg32_write(s->dvd5_reg, addr, value, size);
-    cup2006_dbg(s,
-                  "cup2006: dvd5 write pc=0x%08" PRIx32
-                  " addr=0x%08" HWADDR_PRIx " size=%u value=0x%" PRIx64
-                  "\n", cup2006_guest_pc(), CUP2006_DVD5_BASE + addr,
-                  size, value);
+    trace_cup2006_dvd_dvd5_write_pc_addr(cup2006_guest_pc(), CUP2006_DVD5_BASE + addr, size, value);
     if ((addr & ~3u) == CUP2006_DVD5_KICK &&
         (value & CUP2006_DVD5_KICK_VALUE)) {
         s->dvd5_kicks++;
@@ -474,9 +440,7 @@ static void cup2006_dvd5_write(void *opaque, hwaddr addr, uint64_t value,
         /* STUB: a single engine start; per-request handshakes use the
          * shared window doorbell below. */
         if (s->dvd5_kicks <= 4) {
-            cup2006_dbg(s,  "cup2006: STUB dvd5 engine kick #%" PRIu64
-                    " (0x1f801810=0x%" PRIx64 ")\n",
-                    s->dvd5_kicks, value);
+            trace_cup2006_dvd_stub_dvd5_engine_kick(s->dvd5_kicks, value);
         }
     }
     if ((addr & ~3u) == CUP2006_DVD5_KICK && (value & CUP2006_ADMA_BIT)) {
@@ -548,10 +512,7 @@ static uint64_t cup2006_dvdst_read(void *opaque, hwaddr addr, unsigned size)
         value = cup2006_reg32_read(s->dvdst_reg, addr, size);
     }
 
-    cup2006_dbg(s,
-                  "cup2006: dvdst read  pc=0x%08" PRIx32
-                  " addr=0x%08" HWADDR_PRIx " size=%u value=0x%x\n",
-                  cup2006_guest_pc(), CUP2006_DVDST_BASE + addr, size, value);
+    trace_cup2006_dvd_dvdst_read_pc_addr(cup2006_guest_pc(), CUP2006_DVDST_BASE + addr, size, value);
     return value;
 }
 
@@ -561,11 +522,7 @@ static void cup2006_dvdst_write(void *opaque, hwaddr addr, uint64_t value,
     Cup2006MachineState *s = opaque;
 
     cup2006_reg32_write(s->dvdst_reg, addr, value, size);
-    cup2006_dbg(s,
-                  "cup2006: dvdst write pc=0x%08" PRIx32
-                  " addr=0x%08" HWADDR_PRIx " size=%u value=0x%" PRIx64
-                  "\n", cup2006_guest_pc(), CUP2006_DVDST_BASE + addr,
-                  size, value);
+    trace_cup2006_dvd_dvdst_write_pc_addr(cup2006_guest_pc(), CUP2006_DVDST_BASE + addr, size, value);
 }
 
 static const MemoryRegionOps cup2006_dvd5_ops = {

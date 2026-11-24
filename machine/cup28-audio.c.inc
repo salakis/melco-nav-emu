@@ -180,9 +180,7 @@ static void cup28_audio_complete(void *opaque)
             }
         }
         s->p28_audio_frames += output_bytes / CUP28_PCM_FRAME_BYTES;
-        cup28_dbg(s, "cup28: audio DMA phys=%#x bytes=%zu frames=%" PRIu64 " %s",
-                  address, bytes, s->p28_audio_frames,
-                  s->p28_audio_kiwi ? "KIWI ADPCM" : "PCM");
+        trace_cup28_audio_dma_phys_bytes_frames(address, bytes, s->p28_audio_frames, s->p28_audio_kiwi ? "KIWI ADPCM" : "PCM");
     }
 
     if (s->p28_audio_dma_remaining) {

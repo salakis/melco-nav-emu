@@ -224,8 +224,7 @@ static void cup28_dvd_port_write(void *opaque, hwaddr addr, uint64_t value,
                 if (got != len) {
                     /* Unknown mecha error framing: leave the receiver idle
                      * rather than DMA invented zero-filled sectors. */
-                    cup28_dbg(s, "cup28: DVD short read lba=%x wanted=%zx got=%zx",
-                                lba, len, got);
+                    trace_cup28_dvd_short_read_lba_wanted(lba, len, got);
                     g_free(s->p28_dvd_stream);
                     s->p28_dvd_stream = NULL;
                     s->p28_dvd_stream_len = 0;

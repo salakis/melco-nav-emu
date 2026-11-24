@@ -267,7 +267,7 @@ A scenario directory holds:
 | `CUP2006_CARMARKET=<hex>` | CU-P2006 | market byte from the car (region/marque table above) |
 | `CUP2006_CARMARKER=1` | CU-P2006 | draw an approximation of the 3D car marker (see limitations) |
 | `DISPLAY_BACKEND=sdl` / `none` | both | QEMU display backend instead of the per-unit default (`cocoa,zoom-to-fit=on` on macOS, `sdl` elsewhere) |
-| `-machine verbose=on` | both | log device activity on stderr |
+| `-trace 'cup2006_*'` / `-trace 'cup28_*'` | both | log device activity on stderr; pass after `--`, e.g. `.venv/bin/python -m melco_nav_emu.cli boot -- --trace 'cup28_*'` |
 
 The default `make boot` runs `python -m melco_nav_emu.cli boot`, which
 dispatches to the board module in `src/melco_nav_emu/boards/`; extra QEMU

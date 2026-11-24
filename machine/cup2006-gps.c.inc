@@ -90,9 +90,7 @@ static bool cup2006_gnss_radio_tick(Cup2006MachineState *s)
             error_report("cup2006: invalid GNSS radio replay length");
             exit(1);
         }
-        cup2006_info(s, "cup2006: radio tracking replay %s: %u frames, %u ms,"
-                     " starts at %" PRId64 " ms", path, rp->frames,
-                     rp->interval, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+        trace_cup2006_gps_radio_tracking_replay_frames(path, rp->frames, rp->interval, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
     }
     now = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL);
     if (rp->start < 0) {
@@ -115,9 +113,7 @@ static bool cup2006_gnss_radio_tick(Cup2006MachineState *s)
     }
     frame = (now - rp->start) / rp->interval;
     if (frame >= rp->frames && !rp->ended) {
-        cup2006_info(s, "cup2006: radio recording ended at %" PRId64
-                    " ms (%u frames); reporting signal loss", now,
-                    rp->frames);
+        trace_cup2006_gps_radio_recording_ended_at(now, rp->frames);
         rp->ended = true;
     }
     first = rp->previous == UINT32_MAX ? 0 : rp->previous + 1;
@@ -218,10 +214,7 @@ static void cup2006_gps_tick(void *opaque)
     r[CUP2006_GPS_LATCH >> 2] |= 1;
     s->gps_ticks++;
     if (s->gps_ticks <= 4 || (s->gps_ticks & (s->gps_ticks - 1)) == 0) {
-        cup2006_dbg(s,  "cup2006: STUB gps tick #%" PRIu64 " (empty type-1,"
-                " INTEVT 0x%03x, irq-enable %u)\n",
-                s->gps_ticks, CUP2006_GPS_INTEVT,
-                !!(r[CUP2006_GPS_CTRL >> 2] & CUP2006_GPS_CTRL_IRQEN));
+        trace_cup2006_gps_stub_gps_tick_empty(s->gps_ticks, CUP2006_GPS_INTEVT, !!(r[CUP2006_GPS_CTRL >> 2] & CUP2006_GPS_CTRL_IRQEN));
     }
     cup2006_gps_update_irq(s);
 }
@@ -333,9 +326,8 @@ static void cup2006_gps_load_track(Cup2006MachineState *s)
     if (!s->gps_track_start_ms) {
         s->gps_track_start_ms = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL);
     }
-    cup2006_info(s, "cup2006: car sensor track: %u rows from %s (%.1f Hz)%s",
-                 s->gps_track_n, s->gpstrack, 1.0 / s->gps_track_dt,
-                 (s->gnssreplay && *s->gnssreplay) ? "" :
+    /* Trace events take no floats: the rate becomes milli-Hz. */
+    trace_cup2006_gps_car_sensor_track_rows(s->gps_track_n, s->gpstrack, (int32_t)lrint(1000.0 / s->gps_track_dt), (s->gnssreplay && *s->gnssreplay) ? "" :
                  "; no GNSS recording, the receiver has no signal");
 }
 
@@ -381,10 +373,7 @@ static uint64_t cup2006_gps_read(Cup2006MachineState *s, hwaddr base,
         value = (value >> ((addr & 3) * 8)) & ((1ull << (size * 8)) - 1);
     }
     cup2006_gps_note(s, phys, false, size, value);
-    cup2006_dbg(s,
-                  "cup2006: gps read pc=0x%08" PRIx32
-                  " addr=0x%08" HWADDR_PRIx " size=%u value=0x%" PRIx64 "\n",
-                  cup2006_guest_pc(), phys, size, value);
+    trace_cup2006_gps_read_pc_addr_prix64(cup2006_guest_pc(), phys, size, value);
     return value;
 }
 
@@ -413,10 +402,7 @@ static void cup2006_gps_write(Cup2006MachineState *s, hwaddr base,
         cup2006_gps_update_irq(s);
     }
     cup2006_gps_note(s, phys, true, size, value);
-    cup2006_dbg(s,
-                  "cup2006: gps write pc=0x%08" PRIx32
-                  " addr=0x%08" HWADDR_PRIx " size=%u value=0x%" PRIx64 "\n",
-                  cup2006_guest_pc(), phys, size, value);
+    trace_cup2006_gps_write_pc_addr_prix64(cup2006_guest_pc(), phys, size, value);
 }
 
 static uint64_t cup2006_gps_p4_read(void *opaque, hwaddr addr, unsigned size)

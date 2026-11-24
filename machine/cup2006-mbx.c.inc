@@ -30,21 +30,14 @@ static void cup2006_mbx_write(Cup2006MachineState *s, hwaddr base,
         s->mbx_arm_seq++;
         s->mbx_arm_count++;
         if (s->mbx_arm_count <= 16 || (s->mbx_arm_count & 0xff) == 0) {
-            cup2006_dbg(s,  "cup2006: mbx arm #%u pages 0x%08x..0x%08x\n",
-                    s->mbx_arm_count,
-                    s->mbx_window[CUP2006_MBX_SURFACE_PG_LO >> 2],
-                    s->mbx_window[CUP2006_MBX_SURFACE_PG_HI >> 2]);
+            trace_cup2006_mbx_arm_pages(s->mbx_arm_count, s->mbx_window[CUP2006_MBX_SURFACE_PG_LO >> 2], s->mbx_window[CUP2006_MBX_SURFACE_PG_HI >> 2]);
         }
         if (s->mbx_window[CUP2006_MBX_ENABLE >> 2] & CUP2006_MBX_KICK_BIT) {
             s->mbx_completed_seq = s->mbx_arm_seq;
             if (!(s->mbx_status & CUP2006_MBX_ST_PM_READY)) {
                 s->mbx_status |= CUP2006_MBX_ST_PM_READY;
             }
-            cup2006_dbg(s,  "cup2006: STUB mbx completion #%" PRIu32
-                    ": +0x12C bit 6 set (parameter memory ready)"
-                    " pc=0x%08x t=%" PRId64 "ms\n", s->mbx_completed_seq,
-                    cup2006_guest_pc(),
-                    qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+            trace_cup2006_mbx_stub_mbx_completion_x12c(s->mbx_completed_seq, cup2006_guest_pc(), qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
         }
     }
     if (off == CUP2006_MBX_TA_START && (*slot & 1)) {
@@ -53,9 +46,7 @@ static void cup2006_mbx_write(Cup2006MachineState *s, hwaddr base,
         s->mbx_ta_reads = 0;
         s->mbx_ta_starts++;
         if (s->mbx_ta_starts <= 8 || (s->mbx_ta_starts & 0xff) == 0) {
-            cup2006_dbg(s,  "cup2006: STUB mbx +0x800 TA start #%" PRIu64
-                    " pc=0x%08x t=%" PRId64 "ms\n", s->mbx_ta_starts,
-                    cup2006_guest_pc(), qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+            trace_cup2006_mbx_stub_mbx_x800_ta(s->mbx_ta_starts, cup2006_guest_pc(), qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
         }
     }
     if (off == CUP2006_MBX_RENDER_START && (*slot & 1)) {
@@ -63,22 +54,14 @@ static void cup2006_mbx_write(Cup2006MachineState *s, hwaddr base,
         s->mbx_render_running = true;
         s->mbx_renders++;
         if (s->mbx_renders <= 8 || (s->mbx_renders & 0xff) == 0) {
-            cup2006_dbg(s,  "cup2006: STUB mbx +0x680 render #%" PRIu64
-                    " target=0x%08x %ux%u pc=0x%08x t=%" PRId64 "ms\n",
-                    s->mbx_renders, s->mbx_window[0x65c >> 2],
-                    (s->mbx_window[0x654 >> 2] >> 16) + 1,
-                    (s->mbx_window[0x658 >> 2] >> 16) + 1,
-                    cup2006_guest_pc(), qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+            trace_cup2006_mbx_stub_mbx_x680_render(s->mbx_renders, s->mbx_window[0x65c >> 2], (s->mbx_window[0x654 >> 2] >> 16) + 1, (s->mbx_window[0x658 >> 2] >> 16) + 1, cup2006_guest_pc(), qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
         }
     }
     if (off == CUP2006_MBX_TA_KICK && (*slot & 1)) {
         s->mbx_status |= CUP2006_MBX_ST_TA_KICK;
         s->mbx_ta_kicks++;
         if (s->mbx_ta_kicks <= 8 || (s->mbx_ta_kicks & 0xff) == 0) {
-            cup2006_dbg(s,  "cup2006: STUB mbx +0x81C kick #%" PRIu64
-                    ": +0x12C bit 8 set pc=0x%08x t=%" PRId64 "ms\n",
-                    s->mbx_ta_kicks, cup2006_guest_pc(),
-                    qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+            trace_cup2006_mbx_stub_mbx_x81c_kick(s->mbx_ta_kicks, cup2006_guest_pc(), qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
         }
     }
     /*
@@ -100,9 +83,7 @@ static void cup2006_mbx_write(Cup2006MachineState *s, hwaddr base,
             s->mbx_kick_count++;
             if (s->mbx_kick_count <= 16 ||
                 (s->mbx_kick_count & 0xff) == 0) {
-                cup2006_dbg(s,  "cup2006: mbx kick #%u +0x130=0x%08x"
-                        " with +0x838=%u\n", s->mbx_kick_count, *slot,
-                        s->mbx_window[CUP2006_MBX_SURFACE_END >> 2]);
+                trace_cup2006_mbx_kick_x130_with_x838(s->mbx_kick_count, *slot, s->mbx_window[CUP2006_MBX_SURFACE_END >> 2]);
             }
         }
         if ((*slot & CUP2006_MBX_KICK_BIT) &&
@@ -110,11 +91,7 @@ static void cup2006_mbx_write(Cup2006MachineState *s, hwaddr base,
             s->mbx_arm_seq != s->mbx_completed_seq) {
             s->mbx_completed_seq = s->mbx_arm_seq;
             s->mbx_status |= CUP2006_MBX_ST_PM_READY;
-            cup2006_dbg(s,  "cup2006: STUB mbx completion #%" PRIu32
-                    ": +0x12C bit 6 set (parameter memory ready)"
-                    " pc=0x%08x t=%" PRId64 "ms\n", s->mbx_completed_seq,
-                    cup2006_guest_pc(),
-                    qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+            trace_cup2006_mbx_stub_mbx_completion_x12c_2(s->mbx_completed_seq, cup2006_guest_pc(), qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
         }
     }
     /*
@@ -137,10 +114,7 @@ static void cup2006_mbx_write(Cup2006MachineState *s, hwaddr base,
         if (cleared) {
             s->mbx_status &= ~cleared;
             s->mbx_status_done_acks++;
-            cup2006_dbg(s,  "cup2006: mbx status ack pc=0x%08x value=0x%08x"
-                    " cleared=0x%08x status=0x%08x n=%" PRIu64 "\n",
-                    cup2006_guest_pc(), (uint32_t)value, cleared,
-                    s->mbx_status, s->mbx_status_done_acks);
+            trace_cup2006_mbx_status_ack_pc_value(cup2006_guest_pc(), (uint32_t)value, cleared, s->mbx_status, s->mbx_status_done_acks);
         }
     }
     if (off == CUP2006_MBX_ENABLE || off == CUP2006_MBX_STATUS_ACK ||

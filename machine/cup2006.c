@@ -49,23 +49,7 @@
 #include "ui/input.h"
 #include "qemu/audio.h"
 #include "migration/blocker.h"
-
-/*
- * Device logging, off by default (verbose=on).  Guest-visible behaviour does
- * not depend on it.  The flag lives in the machine state, so each machine
- * instance logs independently; every call site has the state pointer s in
- * scope.
- */
-#define cup2006_info(s, ...) do {               \
-        if ((s)->verbose) {                     \
-            info_report(__VA_ARGS__);           \
-        }                                       \
-    } while (0)
-#define cup2006_dbg(s, ...) do {                \
-        if ((s)->verbose) {                     \
-            fprintf(stderr, __VA_ARGS__);       \
-        }                                       \
-    } while (0)
+#include "trace.h"
 
 /* QEMU 11 replaced cpu_get_phys_page_debug: same result, -1 if unmapped. */
 static hwaddr cpu_get_phys_page_debug(CPUState *cpu, vaddr addr)
@@ -604,8 +588,8 @@ typedef struct Cup2006GnssReplay {
     bool ended;
 } Cup2006GnssReplay;
 
-/* First-touch register logs (verbose=on), one entry per distinct
- * register/direction.  Sized here so the machine state can hold them. */
+/* First-touch register logs, one entry per distinct register/direction.
+ * Sized here so the machine state can hold them. */
 #define CUP2006_BOARD_LOG_MAX 256
 #define CUP2006_SCIF_LOG_MAX  32
 #define CUP2006_GPS_LOG_MAX   32
@@ -643,11 +627,6 @@ struct Cup2006MachineState {
     uint64_t dvd5_irq_blocked;
     bool dvd5irq;
     bool hddwrite;               /* guest HDD writes go to the image file */
-    /*
-     * Device logging (verbose=on): the flag and the first-touch register
-     * logs live here, per machine instance, not in file-scope statics.
-     */
-    bool verbose;
     hwaddr board_log_addr[CUP2006_BOARD_LOG_MAX];
     unsigned board_log_nr;
     bool board_log_full_warned;
@@ -686,8 +665,8 @@ struct Cup2006MachineState {
     MemoryRegion adma_a7_regs;
     uint32_t ssi_cr;
     uint32_t adma_reg[CUP2006_ADMA_SIZE / 4];
-    uint64_t ssi_writes;         /* bounds the verbose SSI write log */
-    uint64_t adma_writes;        /* bounds the verbose DMA write log */
+    uint64_t ssi_writes;         /* bounds the SSI write trace */
+    uint64_t adma_writes;        /* bounds the DMA write trace */
     bool adma_running;
     unsigned adma_desc;          /* 0 = descriptor A, 1 = B */
     uint32_t adma_pos;           /* words done in the current descriptor */
@@ -945,7 +924,7 @@ struct Cup2006MachineState {
     uint64_t dg_blits;
     uint64_t dg_skipped;
     uint64_t dg_work_ops;           /* work-plane pixel ops in this job */
-    int64_t draw_t0_ms;                /* 2DG log timestamps (verbose=on) */
+    int64_t draw_t0_ms;                /* 2DG log timestamps */
     struct {
         bool valid;
         uint32_t base, w, h, stride, fmt;
@@ -1112,10 +1091,6 @@ static void cup2006_board_note(Cup2006MachineState *s, hwaddr addr,
 {
     unsigned i;
 
-    if (!s->verbose) {
-        return;
-    }
-
     for (i = 0; i < s->board_log_nr; i++) {
         if (s->board_log_addr[i] == addr) {
             return;
@@ -1124,16 +1099,12 @@ static void cup2006_board_note(Cup2006MachineState *s, hwaddr addr,
     if (s->board_log_nr == CUP2006_BOARD_LOG_MAX) {
         if (!s->board_log_full_warned) {
             s->board_log_full_warned = true;
-            cup2006_dbg(s, "cup2006: STUB board-register list full (%u"
-                    " addresses); further accesses are not listed\n",
-                    CUP2006_BOARD_LOG_MAX);
+            trace_cup2006_board_stub_board_register_list(CUP2006_BOARD_LOG_MAX);
         }
         return;
     }
     s->board_log_addr[s->board_log_nr++] = addr;
-    cup2006_dbg(s, "cup2006: STUB unmodelled board register 0x%08" PRIx32
-            " (%s, size=%u): reads 0 / writes ignored\n",
-            (uint32_t)addr, is_write ? "write" : "read", size);
+    trace_cup2006_board_stub_unmodelled_board_register((uint32_t)addr, is_write ? "write" : "read", size);
 }
 
 static uint64_t cup2006_board_read(void *opaque, hwaddr addr, unsigned size)
@@ -1379,17 +1350,15 @@ static void cup2006_mbx_draw_marker(Cup2006MachineState *s)
     }
     s->mbx_marker_frames++;
     if (s->mbx_marker_frames == 2 || s->mbx_marker_frames == 200) {
-        cup2006_dbg(s,  "cup2006: mbx render table:");
+        trace_cup2006_board_mbx_render_table();
         for (unsigned r = 0x608; r <= 0x6e8; r += 4) {
-            cup2006_dbg(s,  " %03x=%08x", r, s->mbx_window[r >> 2]);
+            trace_cup2006_board_event_3(r, s->mbx_window[r >> 2]);
         }
-        cup2006_dbg(s,  "\n");
+        trace_cup2006_board_event_4();
     }
     if (s->mbx_marker_frames <= 2 || (s->mbx_marker_frames % 100) == 0) {
-        cup2006_dbg(s,  "cup2006: STUB mbx marker: %u triangles, viewport"
-                " (%.1f,%.1f,%.0f,%.0f), first vertex at (%.1f,%.1f)\n", nt,
-                vp[0], vp[1], vp[2], vp[3], nt ? tri[0].sx[0] : 0,
-                nt ? tri[0].sy[0] : 0);
+        /* Trace events take no floats: coordinates become milli-units. */
+        trace_cup2006_board_stub_mbx_marker_triangles(nt, (int32_t)lrint(vp[0] * 1000), (int32_t)lrint(vp[1] * 1000), (int32_t)lrint(vp[2] * 1000), (int32_t)lrint(vp[3] * 1000), nt ? (int32_t)lrint(tri[0].sx[0] * 1000) : 0, nt ? (int32_t)lrint(tri[0].sy[0] * 1000) : 0);
     }
 }
 
@@ -1526,13 +1495,9 @@ static void cup2006_init(MachineState *machine)
             src->pending = 0;
             s->ata_intc = desc;
             s->ata_intc_src = src;
-            cup2006_info(s, "cup2006: INTC source 0 = ATA completion,"
-                        " INTEVT 0x%03x -> SYSINTR 23 (STUB: INTC2"
-                        " enable/priority registers unmodelled)",
-                        CUP2006_ATA_INTEVT);
+            trace_cup2006_board_intc_source_ata_completion(CUP2006_ATA_INTEVT);
         } else {
-            cup2006_info(s, "cup2006: no free SH INTC source; ATA completion"
-                        " IRQ not deliverable");
+            trace_cup2006_board_no_free_sh_intc();
         }
     }
 
@@ -1556,15 +1521,9 @@ static void cup2006_init(MachineState *machine)
             src->asserted = 0;
             src->pending = 0;
             s->scif0_intc_src = src;
-            cup2006_info(s, "cup2006: INTC source %d (WDT) = SCIF0 receive,"
-                        " INTEVT 0x%03x -> SYSINTR %d (STUB: INTC2"
-                        " enable/priority registers unmodelled)",
-                        CUP2006_SCIF0_INTC_SLOT, CUP2006_SCIF0_INTEVT,
-                        CUP2006_SCIF0_SYSINTR);
+            trace_cup2006_board_intc_source_wdt_scif0(CUP2006_SCIF0_INTC_SLOT, CUP2006_SCIF0_INTEVT, CUP2006_SCIF0_SYSINTR);
         } else {
-            cup2006_info(s, "cup2006: no free SH INTC source; SCIF0 receive"
-                        " IRQ (INTEVT 0x%03x) not deliverable",
-                        CUP2006_SCIF0_INTEVT);
+            trace_cup2006_board_no_free_sh_intc_2(CUP2006_SCIF0_INTEVT);
         }
     }
 
@@ -1590,18 +1549,12 @@ static void cup2006_init(MachineState *machine)
                 src->pending = 0;
                 s->carsig_intc_src = src;
                 found = true;
-                cup2006_info(s, "cup2006: INTC source %u (TMU3 vector) = CARSIG,"
-                            " INTEVT 0x%03x -> SYSINTR 0x%x (STUB: INTC2"
-                            " enable/priority registers unmodelled)",
-                            i, CUP2006_CARSIG_INTEVT,
-                            CUP2006_CARSIG_SYSINTR);
+                trace_cup2006_board_intc_source_tmu3_vector(i, CUP2006_CARSIG_INTEVT, CUP2006_CARSIG_SYSINTR);
                 break;
             }
         }
         if (!found) {
-            cup2006_info(s, "cup2006: no free SH INTC source; CARSIG"
-                        " IRQ (INTEVT 0x%03x) not deliverable",
-                        CUP2006_CARSIG_INTEVT);
+            trace_cup2006_board_no_free_sh_intc_3(CUP2006_CARSIG_INTEVT);
         }
     }
 
@@ -1649,15 +1602,9 @@ static void cup2006_init(MachineState *machine)
         memory_region_add_subregion_overlap(sysmem,
                                             CUP2006_INTC2_A7_BASE,
                                             &s->intc2_a7_regs, 2);
-        cup2006_info(s, "cup2006: display lines: INTEVT 0x%03x is DU-driven"
-                    " (DSSR/DIER), 0x%03x is MBX-driven (+0x12C status &"
-                    " +0x130 enable, +0x134 ack), 0x%03x (2DG) is"
-                    " driven by the job-completion model",
-                    CUP2006_DISP_INTEVT_DTD1, CUP2006_DISP_INTEVT_MBX,
-                    CUP2006_DISP_INTEVT_DTD0);
+        trace_cup2006_board_display_lines_intevt_is(CUP2006_DISP_INTEVT_DTD1, CUP2006_DISP_INTEVT_MBX, CUP2006_DISP_INTEVT_DTD0);
     } else {
-        cup2006_info(s, "cup2006: display interrupt sources unavailable:"
-                    " SH7750 INTC source slots changed at index %u", ok);
+        trace_cup2006_board_display_interrupt_sources_unavailable(ok);
     }
     }
 
@@ -1682,17 +1629,12 @@ static void cup2006_init(MachineState *machine)
                 src->pending = 0;
                 src->parent = desc;
                 s->dvd5_intc_src = src;
-                cup2006_info(s, "cup2006: INTC source %u (TMU4 vector) = DVD 5line,"
-                            " INTEVT 0x%03x -> SYSINTR 0x%x (byte port"
-                            " 0xFFA02008, INTC2 bit 28)", i,
-                            CUP2006_DVD5_INTEVT, CUP2006_DVD5_SYSINTR);
+                trace_cup2006_board_intc_source_tmu4_vector(i, CUP2006_DVD5_INTEVT, CUP2006_DVD5_SYSINTR);
                 break;
             }
         }
         if (!s->dvd5_intc_src) {
-            cup2006_info(s, "cup2006: no free SH INTC source; DVD 5line"
-                        " IRQ (INTEVT 0x%03x) not deliverable",
-                        CUP2006_DVD5_INTEVT);
+            trace_cup2006_board_no_free_sh_intc_4(CUP2006_DVD5_INTEVT);
         }
         /* The engine's sector-DMA completion line, INTEVT 0xF60. */
         for (i = 0; desc && i < desc->nr_sources; i++) {
@@ -1717,8 +1659,7 @@ static void cup2006_init(MachineState *machine)
         address_space_stw_le(&address_space_memory, CUP2006_INTC_IPRA,
                              CUP2006_INTC_IPRA_VALUE,
                              MEMTXATTRS_UNSPECIFIED, NULL);
-        cup2006_info(s, "cup2006: boot-ROM INTC shim: IPRA=0x%04x"
-                    " (TMU0 priority 1)", CUP2006_INTC_IPRA_VALUE);
+        trace_cup2006_board_boot_rom_intc_shim(CUP2006_INTC_IPRA_VALUE);
     }
 
     {
@@ -1777,17 +1718,12 @@ static void cup2006_init(MachineState *machine)
             timer_mod(s->drf_save_timer,
                       qemu_clock_get_ms(QEMU_CLOCK_REALTIME) +
                       CUP2006_DRF_SAVE_MS);
-            cup2006_info(s, "cup2006: drfimage '%s' (%" PRId64 " bytes on disk,"
-                        " image %s)", s->drfimage, (int64_t)st.st_size,
-                        s->drf_image_full_write ? "will be initialised"
+            trace_cup2006_board_drfimage_bytes_on_disk(s->drfimage, (int64_t)st.st_size, s->drf_image_full_write ? "will be initialised"
                                                 : "loaded");
         }
         memory_region_add_subregion_overlap(sysmem, CUP2006_DRF_BASE,
                                             &s->drf_regs, 1);
-        cup2006_info(s, "cup2006: DRF flash window at physical"
-                    " 0x%08x-0x%08x (VA 0x4a000000-0x4bffffff; ROMD array"
-                    " + AMD command STUB + 0xA0 program backing)",
-                    CUP2006_DRF_BASE, CUP2006_DRF_BASE + CUP2006_DRF_SIZE - 1);
+        trace_cup2006_board_drf_flash_window_at(CUP2006_DRF_BASE, CUP2006_DRF_BASE + CUP2006_DRF_SIZE - 1);
     }
 
     cup2006_sramsave_init(s);
@@ -1887,8 +1823,7 @@ static void cup2006_init(MachineState *machine)
                               "cup2006-rtc-a7-regs", CUP2006_RTC_SIZE);
         memory_region_add_subregion_overlap(sysmem, CUP2006_RTC_A7_BASE,
                                             &s->rtc_a7_regs, 1);
-        cup2006_info(s, "cup2006: RTC at 0x%08x (runs on guest time from"
-                    " 2009-09-09 09:09:09; the guest may set it)", CUP2006_RTC_BASE);
+        trace_cup2006_board_rtc_at_runs_on(CUP2006_RTC_BASE);
     }
 
     /* Two PC-card slots: each 4 MiB window is card memory (plain RAM), the
@@ -1941,9 +1876,7 @@ static void cup2006_init(MachineState *machine)
                 &s->pcc_regs_mr[slot], 1);
             g_free(name);
         }
-        cup2006_info(s, "cup2006: STUB PC-card slots at 0x%08x (2 x %u MiB, "
-                    "ATA card present, 3.3V, ready)",
-                    CUP2006_PCC_BASE, CUP2006_PCC_SLOT_SIZE >> 20);
+        trace_cup2006_board_stub_pc_card_slots(CUP2006_PCC_BASE, CUP2006_PCC_SLOT_SIZE >> 20);
     }
 
     if (s->ata) {
@@ -1990,10 +1923,7 @@ static void cup2006_init(MachineState *machine)
                                                        g_int64_equal,
                                                        g_free, g_free);
             }
-            cup2006_info(s, "cup2006: HDD image '%s' (%" PRIu64 " bytes,"
-                        " %" PRIu64 " sectors; read on demand, writes %s)",
-                        s->hddimage, s->hdd_size, s->hdd_size / 512,
-                        s->hddwrite ? "go to the file" : "are RAM-only");
+            trace_cup2006_board_hdd_image_bytes_ectors(s->hddimage, s->hdd_size, s->hdd_size / 512, s->hddwrite ? "go to the file" : "are RAM-only");
         }
     }
 
@@ -2009,8 +1939,7 @@ static void cup2006_init(MachineState *machine)
             exit(1);
         }
         s->dvd_size = lseek(s->dvd_fd, 0, SEEK_END);
-        cup2006_info(s, "cup2006: DVD image '%s' (%" PRIu64 " bytes)",
-                    s->dvdimage, s->dvd_size);
+        trace_cup2006_board_dvd_image_bytes(s->dvdimage, s->dvd_size);
     }
     /* Disc queue: the loaded image, then dvdnext= in turn, cycling. */
     {
@@ -2059,9 +1988,7 @@ static void cup2006_init(MachineState *machine)
                           "cup2006-i2c-a7", CUP2006_I2C_SIZE);
     memory_region_add_subregion_overlap(sysmem, CUP2006_I2C_A7_BASE,
                                         &s->i2c_a7_regs, 1);
-    cup2006_info(s, "cup2006: I2C/PLL controller at 0x%08x (alias 0x%08x): "
-                "STUB single-byte transfers, ACK, receive byte 0",
-                CUP2006_I2C_BASE, CUP2006_I2C_A7_BASE);
+    trace_cup2006_board_i2c_pll_controller_at(CUP2006_I2C_BASE, CUP2006_I2C_A7_BASE);
 
     /* GPS command/status latch, always on; the A7 alias needs its own region
      * so the log names the address the guest used (0x1F93D000). */
@@ -2086,9 +2013,7 @@ static void cup2006_init(MachineState *machine)
                           "cup2006-rcd-a7", CUP2006_RCD_SIZE);
     memory_region_add_subregion_overlap(sysmem, CUP2006_RCD_A7_BASE,
                                         &s->rcd_a7_regs, 1);
-    cup2006_info(s, "cup2006: RCD block at 0x%08x (alias 0x%08x): STUB latches "
-                "+0x000/+0x008, +0x02c record reads 0, no interrupt",
-                CUP2006_RCD_BASE, CUP2006_RCD_A7_BASE);
+    trace_cup2006_board_rcd_block_at_alias(CUP2006_RCD_BASE, CUP2006_RCD_A7_BASE);
 
     /*
      * SCIF page 0xFF92A000 and its alias 0x1F92A000, always on. STUB: SCFSR
@@ -2137,8 +2062,7 @@ static void cup2006_init(MachineState *machine)
     if (s->keys) {
         s->key_handler = qemu_input_handler_register((DeviceState *)s,
                                                      &cup2006_key_handler);
-        cup2006_info(s, "cup2006: key pad: QEMU input -> SCIF0 key report"
-                    " cmd %04x (key_seq %u)", s->key_src, s->key_seq);
+        trace_cup2006_board_key_pad_qemu_input(s->key_src, s->key_seq);
     }
 
     /*
@@ -2167,17 +2091,10 @@ static void cup2006_init(MachineState *machine)
             src->pending = 0;
             s->power_intc_src = src;
             s->power_src_ready = true;
-            cup2006_info(s, "cup2006: INTC source %u (DMAC_DMTE0 vector) = board"
-                        " power, INTEVT 0x%03x -> SYSINTR 0x%x (STUB:"
-                        " INTC2 enable/priority registers unmodelled;"
-                        " F12 = ACC-off)",
-                        CUP2006_POWER_INTC_SLOT, CUP2006_POWER_INTEVT,
-                        CUP2006_POWER_SYSINTR);
+            trace_cup2006_board_intc_source_dmac_dmte0(CUP2006_POWER_INTC_SLOT, CUP2006_POWER_INTEVT, CUP2006_POWER_SYSINTR);
         }
         if (!s->power_src_ready) {
-            cup2006_info(s, "cup2006: no free SH INTC source; board power IRQ"
-                        " (INTEVT 0x%03x) not deliverable",
-                        CUP2006_POWER_INTEVT);
+            trace_cup2006_board_no_free_sh_intc_5(CUP2006_POWER_INTEVT);
         }
     }
 
@@ -2219,8 +2136,7 @@ static void cup2006_init(MachineState *machine)
                                           cup2006_wheel_tick, s);
             timer_mod(s->wheel_timer, CUP2006_WHEEL_PERIOD_MS);
         }
-        cup2006_info(s, "cup2006: gps feed: measurement level (%s); the fix is"
-                    " gpslib's own", (s->gnssreplay && *s->gnssreplay) ?
+        trace_cup2006_board_gps_feed_measurement_level((s->gnssreplay && *s->gnssreplay) ?
                     "radio tracking replay" : "no recording: no signal");
     }
     if (s->carsig) {
@@ -2309,10 +2225,7 @@ static void cup2006_init(MachineState *machine)
         memcpy(s->drf_data + load_addr, data, size);
         g_free(data);
 
-        cup2006_info(s, "cup2006: loaded %s at 0x%08" HWADDR_PRIx " (%" PRId64
-                    " bytes), reset PC 0x%08x",
-                    machine->kernel_filename, load_addr, (int64_t)size,
-                    reset_pc);
+        trace_cup2006_board_loaded_at_prix64_bytes(machine->kernel_filename, load_addr, (int64_t)size, reset_pc);
     }
 
     /* The device models have no vmstate: snapshots and migration would
@@ -2586,16 +2499,6 @@ static void cup2006_set_drfimage(Object *obj, const char *value, Error **errp)
     s->drfimage = g_strdup(value ? value : "");
 }
 
-static bool cup2006_get_verbose(Object *obj, Error **errp)
-{
-    return CUP2006_MACHINE(obj)->verbose;
-}
-
-static void cup2006_set_verbose(Object *obj, bool value, Error **errp)
-{
-    CUP2006_MACHINE(obj)->verbose = value;
-}
-
 static bool cup2006_get_carmarker(Object *obj, Error **errp)
 {
     return CUP2006_MACHINE(obj)->carmarker;
@@ -2676,11 +2579,6 @@ static void cup2006_machine_class_init(ObjectClass *oc, const void *data)
         "STUB, off by default: draw an approximation of Navi's 3D car marker "
         "(the MBX 3D core is not emulated, so the marker is otherwise missing)");
 
-    object_class_property_add_bool(oc, "verbose",
-                                   cup2006_get_verbose,
-                                   cup2006_set_verbose);
-    object_class_property_set_description(oc, "verbose",
-        "log device activity (Sub-CPU link, keys, ATA, display, GPS) on stderr");
 
     /*
      * The board's self-test sample register at 0xff93c000 (hardware

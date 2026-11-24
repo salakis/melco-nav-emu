@@ -57,12 +57,7 @@ static void cup2006_audio_summary(Cup2006MachineState *s)
 {
     s->audio_report_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
 
-    if (!s->verbose) {
-        return;
-    }
-    cup2006_dbg(s, "cup2006: audio summary frames=%" PRIu64 " halves=%" PRIu64
-                " rate=%u stalls=%" PRIu64 "\n", s->audio_frames,
-                s->adma_halves, cup2006_ssi_rate(s), s->audio_stalls);
+    trace_cup2006_audio_summary_frames_lves_rate(s->audio_frames, s->adma_halves, cup2006_ssi_rate(s), s->audio_stalls);
 }
 
 static void cup2006_ssi_write(void *opaque, hwaddr addr, uint64_t value,
@@ -71,9 +66,7 @@ static void cup2006_ssi_write(void *opaque, hwaddr addr, uint64_t value,
     Cup2006MachineState *s = opaque;
 
     if (s->ssi_writes++ < 16) {
-        cup2006_dbg(s,  "cup2006: audio ssi write +0x%02" HWADDR_PRIx
-                " = 0x%08" PRIx64 " pc=0x%08x\n", addr, value,
-                cup2006_guest_pc());
+        trace_cup2006_audio_ssi_write_prix64_pc(addr, value, cup2006_guest_pc());
     }
     if ((addr & ~3u) == 0x0 && size == 4) {
         s->ssi_cr = value;
@@ -282,9 +275,7 @@ static void cup2006_adma_write(void *opaque, hwaddr addr, uint64_t value,
 
     cup2006_reg32_write((uint8_t *)s->adma_reg, addr, value, size);
     if (s->adma_writes++ < 24) {
-        cup2006_dbg(s,  "cup2006: audio dma write +0x%02" HWADDR_PRIx
-                " = 0x%08" PRIx64 " pc=0x%08x\n", addr, value,
-                cup2006_guest_pc());
+        trace_cup2006_audio_dma_write_prix64_pc(addr, value, cup2006_guest_pc());
     }
     if ((addr & ~3u) == 0x2c && (value & 3)) {
         /* Start: descriptor A first, then B, A,... */
@@ -295,10 +286,7 @@ static void cup2006_adma_write(void *opaque, hwaddr addr, uint64_t value,
         s->adma_frac = 0;
         s->adma_last_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
         if (s->adma_starts++ < 8) {
-            cup2006_info(s, "cup2006: audio DMA start #%" PRIu64 " (A %u, B %u"
-                        " words, %u Hz)", s->adma_starts,
-                        s->adma_reg[0x08 / 4], s->adma_reg[0x14 / 4],
-                        cup2006_ssi_rate(s));
+            trace_cup2006_audio_dma_start_words_hz(s->adma_starts, s->adma_reg[0x08 / 4], s->adma_reg[0x14 / 4], cup2006_ssi_rate(s));
         }
         cup2006_audio_voice(s);
     } else if ((addr & ~3u) == 0x30 && (value & 1)) {
@@ -353,8 +341,7 @@ static void cup2006_audio_init(Cup2006MachineState *s, MachineState *ms,
         break;
     }
     if (!s->adma_src) {
-        cup2006_info(s, "cup2006: no free SH INTC source; audio DMA interrupt"
-                    " (INTEVT 0x%03x) not deliverable", CUP2006_ADMA_INTEVT);
+        trace_cup2006_audio_no_free_sh_intc(CUP2006_ADMA_INTEVT);
     }
 
     if (ms->audiodev) {
@@ -365,7 +352,7 @@ static void cup2006_audio_init(Cup2006MachineState *s, MachineState *ms,
             error_report_err(err);
             exit(1);
         }
-        cup2006_info(s, "cup2006: sound output on audiodev '%s'", ms->audiodev);
+        trace_cup2006_audio_sound_output_on_audiodev(ms->audiodev);
     }
 }
 
