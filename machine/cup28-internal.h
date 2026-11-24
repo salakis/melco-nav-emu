@@ -166,6 +166,9 @@ struct Cup28MachineState {
     uint8_t *p28_flr_mem;
 };
 
+/* Data shared across files. */
+extern const MemoryRegionOps cup28_drf_alias_ops;
+
 /* Functions called across files (non-static, cup28_ prefix kept). */
 void cup28_audio_init(Cup28MachineState *s, MemoryRegion *mem,
                        const char *audiodev);

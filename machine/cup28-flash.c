@@ -1,5 +1,10 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later
- * Copyright (c) 2026 melco-nav-emu contributors */
+/*
+ * Volvo VNS CUP28 board: backup SRAM and the flash alias window.
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright (c) 2026 melco-nav-emu contributors
+ */
+
+#include "cup28-internal.h"
 
 void cup28_bksram_init(Cup28MachineState *s)
 {
@@ -37,7 +42,7 @@ static void cup28_drf_alias_write(void *opaque, hwaddr addr, uint64_t value,
     melco_amdflash_write(s->drf, addr & (CUP28_FLASH_SIZE - 1), value, size);
 }
 
-static const MemoryRegionOps cup28_drf_alias_ops = {
+const MemoryRegionOps cup28_drf_alias_ops = {
     .read = cup28_drf_alias_read,
     .write = cup28_drf_alias_write,
     .valid.min_access_size = 1,
