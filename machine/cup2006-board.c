@@ -1,12 +1,11 @@
 /*
- * CU-P2006 machine: board I/O: 16550 UART, self-test/ADC block, GPS register log, I2C.
- *
- * Part of machine/cup2006.c, compiled as one translation unit (it is
- * #included there, in this order); not a standalone source file.
- *
- * Copyright (c) 2026 melco-nav-emu contributors
+ * Volvo CU-P2006 board: cup2006-board device.
  * SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright (c) 2026 melco-nav-emu contributors
  */
+
+#include "cup2006-internal.h"
+
 
 static uint64_t cup2006_uart_read(void *opaque, hwaddr addr, unsigned size)
 {
