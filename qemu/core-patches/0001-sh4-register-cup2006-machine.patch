@@ -35,7 +35,7 @@ shared melco-nvram.c / melco-amdflash.c under CONFIG_MELCO_COMMON.
    'sh7750_regnames.c',
  ))
  sh4_ss.add(when: 'CONFIG_R2D', if_true: files('r2d.c'))
-+sh4_ss.add(when: 'CONFIG_CUP2006', if_true: files('cup2006.c'))
++sh4_ss.add(when: 'CONFIG_CUP2006', if_true: files('cup2006.c', 'cup2006-flash.c'))
 +sh4_ss.add(when: 'CONFIG_MELCO_COMMON', if_true: files('melco-nvram.c', 'melco-amdflash.c', 'melco-amdflash-core.c', 'melco-sensors.c', 'melco-sensors-core.c'))
  
  hw_arch += {'sh4': sh4_ss}
