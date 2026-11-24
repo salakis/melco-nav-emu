@@ -1,12 +1,11 @@
 /*
- * CU-P2006 machine: sound output. The SSI at 0xFF911000 (SH7764 hw manual
- * sec. 18), fed by a ping-pong DMA channel, streams 16-bit stereo PCM to a
- * QEMU audio backend at the SSI's sample rate. STUB: the SSI's own serial
- * bus is not modelled.
- *
- * Copyright (c) 2026 melco-nav-emu contributors
+ * Volvo CU-P2006 board: cup2006-audio device.
  * SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright (c) 2026 melco-nav-emu contributors
  */
+
+#include "cup2006-internal.h"
+
 
 /* The SSI's bits (SH7764 SSICR / SSISR). */
 #define CUP2006_SSICR_EN        0x00000001
