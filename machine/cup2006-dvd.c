@@ -402,6 +402,7 @@ static void cup2006_dvd5_doorbell(Cup2006MachineState *s)
     uint8_t req[24];
     unsigned len;
 
+    s->dvd5_req_staged = false;
     memcpy(req, s->dvd5_req, sizeof(req));
     len = cup2006_reg32_read(s->dvd5_req, 0x40, 4);
     if (len == 0 || len > sizeof(req) || req[0] < 0xb8 || req[0] > 0xbf) {
@@ -474,12 +475,31 @@ static void cup2006_dvd5_req_write(void *opaque, hwaddr addr, uint64_t value,
     Cup2006MachineState *s = opaque;
 
     cup2006_reg32_write(s->dvd5_req, addr, value, size);
-    /* The sender memcpy's the frame into this window, stores its length at
-     * +0x40 and then rings the doorbell (reply window +0x44) as the last
-     * step.  Answer once, on the doorbell only: triggering on the length
-     * store as well made every frame get two replies. */
-    if (addr == CUP2006_DVD5_DOORBELL &&
-        (value & CUP2006_DVD5_DOORBELL_V)) {
+    /* The sender memcpy's the frame into this window, then stores its length
+     * at +0x40 (dvd.dll 0x039a99b6-ba) and rings the doorbell (INTC2
+     * 0xFFE00044 bit 28, cup2006_dvd5_host_doorbell) as the last step.  The
+     * length store marks a frame as staged; the doorbell answers it once. */
+    if (addr == 0x40) {
+        s->dvd5_req_staged = value >= 1 && value <= 24 &&
+                             s->dvd5_req[0] >= 0xb8 && s->dvd5_req[0] <= 0xbf;
+    }
+}
+
+/*
+ * The host rang the drive: dvd.dll's sender 0x039a9954 ends with
+ * `mov.l r2,@r3` at 0x039a99cc, storing 0x10000000 (pool 0x039a9a18) through
+ * the global 0x01f89814 (pool 0x039a9a14).  Its init 0x039a8700-0x039a874e
+ * fills that global with the address its I/O-map helper returned for PA
+ * 0xFFE0001C (`mov.l =0xffe0001c,r4` 0x039a870c, `jsr @r9` 0x039a871c), plus
+ * 40: the doorbell is INTC2 0xFFE00044 bit 28 (measured: r3=0x006f0044 at
+ * 0x039a99cc, gva2gpa 0x1FE00044, its area-7 alias).  The same bit also
+ * enables and completes SYSINTR 0x1C, so only a write with a staged request
+ * frame rings the drive.  STUB: the drive reads the frame and answers
+ * at once.
+ */
+void cup2006_dvd5_host_doorbell(Cup2006MachineState *s)
+{
+    if (s->dvd5_req_staged) {
         cup2006_dvd5_doorbell(s);
     }
 }
@@ -489,11 +509,9 @@ static void cup2006_dvd5_rpl_write(void *opaque, hwaddr addr, uint64_t value,
 {
     Cup2006MachineState *s = opaque;
 
+    /* No doorbell here: the guest's doorbell is INTC2 0xFFE00044 bit 28
+     * (cup2006_dvd5_host_doorbell); no dvd.dll code writes this window. */
     cup2006_reg32_write(s->dvd5_rpl, addr, value, size);
-    if (addr == CUP2006_DVD5_DOORBELL &&
-        (value & CUP2006_DVD5_DOORBELL_V)) {
-        cup2006_dvd5_doorbell(s);
-    }
 }
 
 static uint64_t cup2006_dvdst_read(void *opaque, hwaddr addr, unsigned size)

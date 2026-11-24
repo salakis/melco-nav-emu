@@ -206,11 +206,12 @@ hwaddr cpu_get_phys_page_debug(CPUState *cpu, vaddr addr)
 
 /* DVD 5line mecha link register window 0xFF801700-0xFF8018FF (alias
  * 0x1F801700), an external board window: reads return the last value
- * written. Request frame at PA 0x08300000, reply/doorbell window at PA
- * 0x1FDF0000; the model answers the doorbell. */
+ * written. Request frame at PA 0x08300000 (length at +0x40), reply window
+ * at PA 0x1FDF0000; the doorbell is INTC2 0xFFE00044 bit 28 (see
+ * cup2006_dvd5_host_doorbell). */
 #define CUP2006_DVD5_A7_BASE     0x1f801700
 #define CUP2006_DVD5_WIN_REQ     0x08300000 /* request frame + length at +0x40 */
-/* Reply window PA 0x1FDF0000; the doorbell write lands at +0x44. */
+/* Reply window PA 0x1FDF0000 (the model copies each reply there). */
 #define CUP2006_DVD5_WIN_RPL     0x1fdf0000
 /* Driver's reply buffer. */
 /* Loaded DVD-ROM status: see cup2006_dvd5_spinup. */
@@ -932,7 +933,7 @@ static void cup2006_init(MachineState *machine)
 
     /* DVD 5line mecha link: 0xFF801700-0xFF8018FF is an external board
      * window (not an SH7751 BSC register); request frame at PA 0x08300000,
-     * control/doorbell window at PA 0x1FDF0000. */
+     * reply window at PA 0x1FDF0000, doorbell INTC2 0xFFE00044 bit 28. */
     memory_region_init_io(&s->dvd5_regs, NULL, &cup2006_dvd5_ops, s,
                           "cup2006-dvd5-regs", CUP2006_DVD5_SIZE);
     memory_region_add_subregion_overlap(sysmem, CUP2006_DVD5_BASE,

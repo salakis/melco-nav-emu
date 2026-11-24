@@ -219,6 +219,10 @@ chip, `sensors.csv` for the car's wheel and gyro sensors on the same clock).
 - **DU interrupt.** The DU model raises INTEVT 0x780 with every DIER enable
   clear, which the SH7785 manual does not describe; the guest relies on the
   line, so it is kept as-is (STUB departure, noted here deliberately).
+- **DVD doorbell.** The driver rings the drive by writing INTC2 0xFFE00044
+  bit 28 after staging a request frame at PA 0x08300000; the same bit also
+  enables and completes the drive's interrupt, so only a write with a staged
+  frame is a doorbell. The drive answers at once (STUB).
 - **DVD reply address.** The drive's replies are also written to one fixed
   guest virtual address from one firmware build (the driver does not program
   that address in any modelled register), translated through the current

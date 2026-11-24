@@ -289,8 +289,6 @@ OBJECT_DECLARE_SIMPLE_TYPE(Cup2006MachineState, CUP2006_MACHINE)
 #define CUP2006_DVD5_BASE        0xff801700
 #define CUP2006_DVD5_KICK        0x110      /* 0x1F801810 */
 #define CUP2006_DVD5_KICK_VALUE  0x40000000
-#define CUP2006_DVD5_DOORBELL    0x44
-#define CUP2006_DVD5_DOORBELL_V  0x10000000
 #define CUP2006_DVD5_REPLY_VA    0x01f891a0
 #define CUP2006_DVD5_ST_ROM      0x48
 #define CUP2006_DVD5_TYPE_DVDROM 0x04
@@ -371,6 +369,7 @@ struct Cup2006MachineState {
     uint8_t dvdst_reg[CUP2006_DVDST_SIZE];
     uint64_t dvd5_kicks;
     uint64_t dvd5_replies;
+    bool dvd5_req_staged;     /* a request frame waits for the doorbell */
     uint64_t dvd5_reads;     /* b8 93 read requests on the 5line link */
     /* the completion line and the byte port it serves. */
     struct intc_source *dvd5_intc_src;
@@ -832,6 +831,7 @@ void cup2006_display_create(Cup2006MachineState *s);
 void cup2006_du_flag_off(void *opaque);
 void cup2006_du_frame_tick(void *opaque);
 void cup2006_dvd5_irq_ack(Cup2006MachineState *s);
+void cup2006_dvd5_host_doorbell(Cup2006MachineState *s);
 void cup2006_dvd5_spinup(Cup2006MachineState *s);
 void cup2006_dvd5_write(void *opaque, hwaddr addr, uint64_t value, unsigned size);
 void cup2006_dvd_eject_button(Cup2006MachineState *s);

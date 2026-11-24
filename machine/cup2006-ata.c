@@ -443,6 +443,10 @@ void cup2006_intc2_write_at(Cup2006MachineState *s, hwaddr addr,
             s->dvd5_intc_src->asserted) {
             cup2006_dvd5_irq_ack(s);
         }
+        /* The same bit is dvd.dll's 5-line doorbell (cup2006-dvd.c). */
+        if (val & CUP2006_DVD5_INTC2_BIT) {
+            cup2006_dvd5_host_doorbell(s);
+        }
         for (i = 0; i < CUP2006_DISP_LINES; i++) {
             if (val & cup2006_disp_ack_bit[i]) {
                 s->disp_enable[i]++;
