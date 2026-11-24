@@ -46,9 +46,10 @@ int main(void)
     assert(!wr(0x1000, 0x30303030, 4));
     assert(arr[0x1000] == 0xff && op == MELCO_AMDFLASH_OP_NONE);
 
-    /* unlock + program ANDs the data into the array */
+    /* unlock + program ANDs the data into the array (A0 itself changes
+     * nothing, so it returns false but arms the address) */
     unlock55();
-    assert(wr(0x1000, 0xa0a0a0a0, 4));      /* A0 arms the address */
+    assert(!wr(0x1000, 0xa0a0a0a0, 4));     /* A0 arms the address */
     assert(c.program_pending && c.program_addr == 0x1000);
     arr[0x1000] = 0xf0;
     assert(wr(0x1000, 0x3c3c3c3c, 4));      /* data: old & new */
@@ -93,7 +94,7 @@ int main(void)
     memset(arr, 0xff, SZ);
     assert(wr(0x2aa8, 0x00aa00aa, 4));
     assert(wr(0x1554, 0x00550055, 4));
-    assert(wr(0x1000, 0x00a000a0, 4));      /* A0 */
+    assert(!wr(0x1000, 0x00a000a0, 4));     /* A0 */
     assert(c.program_pending && c.program_addr == 0x1000);
     assert(wr(0x1000, 0x0000000f, 4));      /* data write, one lane */
     assert(arr[0x1000] == 0x0f);
