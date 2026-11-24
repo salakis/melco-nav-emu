@@ -146,6 +146,64 @@ int main(void)
     wr(0x2aa8, 0x000000aa, 4);
     assert(c.state == MELCO_AMDFLASH_ST_READ);
 
+    /* The CUP28 guest writes every command cycle to both halves of its
+     * 32-bit bus: the same byte at two word addresses four bytes apart, each
+     * carrying it on both lanes.  The repeat keeps the cycle; restarting it
+     * would drop the doubled 55 into read mode and no erase would happen. */
+    melco_amdflash_core_init(&c, arr, SZ, SECTOR, 2, 0x0001, 0x227e);
+    memset(arr, 0xff, SZ);
+    arr[0x2000] = 0x00;
+    wr(0x2aa8, 0x00aa00aa, 4);
+    wr(0x2aac, 0x00aa00aa, 4);
+    assert(c.state == MELCO_AMDFLASH_ST_U1);
+    wr(0x1550, 0x00550055, 4);
+    wr(0x1554, 0x00550055, 4);
+    assert(c.state == MELCO_AMDFLASH_ST_U2);
+    wr(0x2aa8, 0x00800080, 4);
+    wr(0x2aac, 0x00800080, 4);
+    assert(c.state == MELCO_AMDFLASH_ST_ERASE);
+    wr(0x2aa8, 0x00aa00aa, 4);
+    wr(0x2aac, 0x00aa00aa, 4);
+    assert(c.state == MELCO_AMDFLASH_ST_ERASE_U1);
+    wr(0x1550, 0x00550055, 4);
+    wr(0x1554, 0x00550055, 4);
+    assert(c.state == MELCO_AMDFLASH_ST_ERASE_ARMED);
+    assert(wr(0x2000, 0x00300030, 4));      /* 30 erases the sector */
+    assert(op == MELCO_AMDFLASH_OP_SECTOR_ERASE);
+    assert(off == 0x2000 && len == SECTOR);
+    assert(arr[0x2000] == 0xff);
+    /* the other half of the 30 finds read mode and changes nothing */
+    wr(0x2004, 0x00300030, 4);
+    assert(c.state == MELCO_AMDFLASH_ST_READ);
+    assert(!wr(0x2004, 0x00300030, 4));
+
+    /* the same doubling through unlock bypass and a program cycle */
+    wr(0x2aa8, 0x00aa00aa, 4);
+    wr(0x2aac, 0x00aa00aa, 4);
+    wr(0x1550, 0x00550055, 4);
+    wr(0x1554, 0x00550055, 4);
+    wr(0x2aa8, 0x00200020, 4);
+    wr(0x2aac, 0x00200020, 4);
+    assert(c.bypass);
+    arr[0x5000] = 0xff;
+    assert(!wr(0x5000, 0x00a000a0, 4));     /* A0 arms the cycle */
+    assert(c.program_pending);
+    assert(wr(0x5000, 0x00000001, 4));      /* data, set in lane 0 only */
+    assert(arr[0x5000] == 0x01);
+
+    /* the doubled half of an A0 is that same command, not the data write:
+     * the cycle stays armed and the array is untouched */
+    arr[0x6000] = 0xff;
+    assert(!wr(0x5004, 0x00a000a0, 4));     /* A0 */
+    assert(!wr(0x5008, 0x00a000a0, 4));     /* its pair, four bytes on */
+    assert(c.program_pending && arr[0x5008] == 0xff);
+    assert(wr(0x6000, 0x0000000e, 4));      /* the real data still programs */
+    assert(arr[0x6000] == 0x0e);
+    /* data that merely looks like A0, away from the pair, does program */
+    assert(!wr(0x5004, 0x00a000a0, 4));
+    assert(wr(0x6004, 0x00a000a0, 4));
+    assert(arr[0x6004] == 0xa0);
+
     printf("melco-amdflash-core: all checks passed\n");
     return 0;
 }

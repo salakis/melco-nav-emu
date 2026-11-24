@@ -45,10 +45,12 @@ void melco_amdflash_core_init(MelcoAmdFlashCore *c, uint8_t *data,
 void melco_amdflash_core_reset(MelcoAmdFlashCore *c)
 {
     c->state = MELCO_AMDFLASH_ST_READ;
+    c->cycle_cmd = 0;
     c->bypass = false;
     c->autoselect = false;
     c->autoselect_bank = 0;
     c->program_pending = false;
+    c->arm_addr = 0;
 }
 
 /* The ID block autoselect serves at the bank base. */
@@ -78,12 +80,21 @@ bool melco_amdflash_core_write(MelcoAmdFlashCore *c, uint64_t addr,
         return false;
     }
 
+    is_cmd = cmd != 0 && core_cmd(c, value, size, cmd);
+
     /* An armed program cycle takes the next write as data, whatever its
      * value and wherever it lands: the A0 goes to an unlock address and the
-     * data to the target address. */
+     * data to the target address.  The exception is the other half of a
+     * doubled A0 (see below): the same command at the paired address, which
+     * leaves the cycle armed instead of programming it. */
     if (c->program_pending) {
+        if (is_cmd && cmd == 0xa0 &&
+            (addr + 4 == c->arm_addr || c->arm_addr + 4 == addr)) {
+            return false;
+        }
         c->program_pending = false;
         c->state = MELCO_AMDFLASH_ST_READ;
+        c->cycle_cmd = 0;
         for (i = 0; i < size && addr + i < c->size; i++) {
             /* A program cycle can only clear bits: old & new.  Only an erase
              * sets bits back to 1. */
@@ -95,11 +106,21 @@ bool melco_amdflash_core_write(MelcoAmdFlashCore *c, uint64_t addr,
         return i > 0;
     }
 
-    is_cmd = cmd != 0 && core_cmd(c, value, size, cmd);
-
     /* F0 resets to read mode from anywhere. */
     if (is_cmd && cmd == 0xf0) {
         melco_amdflash_core_reset(c);
+        return false;
+    }
+
+    /*
+     * The boards' flash bus is 32 bits wide over two 16-bit parts, and their
+     * drivers write every command cycle to both halves (two word addresses,
+     * four bytes apart, each carrying the byte on both lanes).  The second
+     * write is the other half of the same cycle, so a repeat of the command
+     * the cycle is on keeps the state instead of restarting it.
+     */
+    if (is_cmd && c->state != MELCO_AMDFLASH_ST_READ &&
+        cmd == c->cycle_cmd) {
         return false;
     }
 
@@ -121,6 +142,7 @@ bool melco_amdflash_core_write(MelcoAmdFlashCore *c, uint64_t addr,
              * it needs the AA 55 unlock first. */
             if (c->bypass) {
                 c->program_pending = true;
+                c->arm_addr = addr;
             }
         } else if (is_cmd && cmd == 0x90) {
             if (c->bypass) {
@@ -140,6 +162,7 @@ bool melco_amdflash_core_write(MelcoAmdFlashCore *c, uint64_t addr,
     case MELCO_AMDFLASH_ST_U2:
         if (is_cmd && cmd == 0xa0) {
             c->program_pending = true;
+            c->arm_addr = addr;
             c->state = MELCO_AMDFLASH_ST_READ;
         } else if (is_cmd && cmd == 0x80) {
             c->state = MELCO_AMDFLASH_ST_ERASE;
@@ -173,6 +196,7 @@ bool melco_amdflash_core_write(MelcoAmdFlashCore *c, uint64_t addr,
             }
             memset(c->data + sector, 0xff, slen);
             c->state = MELCO_AMDFLASH_ST_READ;
+            c->cycle_cmd = 0;
             *off = sector;
             *len = slen;
             *op = MELCO_AMDFLASH_OP_SECTOR_ERASE;
@@ -182,6 +206,7 @@ bool melco_amdflash_core_write(MelcoAmdFlashCore *c, uint64_t addr,
             /* STUB: chip erase completes instantly. */
             memset(c->data, 0xff, c->size);
             c->state = MELCO_AMDFLASH_ST_READ;
+            c->cycle_cmd = 0;
             *off = 0;
             *len = c->size;
             *op = MELCO_AMDFLASH_OP_CHIP_ERASE;
@@ -190,6 +215,7 @@ bool melco_amdflash_core_write(MelcoAmdFlashCore *c, uint64_t addr,
         c->state = MELCO_AMDFLASH_ST_READ;
         break;
     }
+    c->cycle_cmd = is_cmd ? cmd : 0;
     return false;
 }
 

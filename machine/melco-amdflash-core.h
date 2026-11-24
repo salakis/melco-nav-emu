@@ -45,10 +45,12 @@ typedef struct MelcoAmdFlashCore {
     uint16_t id_device;
 
     unsigned state;
+    uint8_t cycle_cmd;          /* command of the cycle the state is in */
     bool bypass;                /* unlock bypass entered (AA 55 20) */
     bool autoselect;            /* 90 seen: reads of the bank serve the IDs */
     uint64_t autoselect_bank;
     bool program_pending;       /* A0 seen: the next write is the data */
+    uint64_t arm_addr;          /* address of the A0 that armed it */
 } MelcoAmdFlashCore;
 
 void melco_amdflash_core_init(MelcoAmdFlashCore *c, uint8_t *data,

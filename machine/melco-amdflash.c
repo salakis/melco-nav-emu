@@ -103,8 +103,6 @@ static void melco_amdflash_sync_romd(MelcoAmdFlash *s, bool was_autoselect)
     if (s->core.autoselect == was_autoselect) {
         return;
     }
-    memory_region_flush_rom_device(&s->mem, s->core.autoselect_bank,
-                                   sizeof(uint64_t));
     memory_region_rom_device_set_romd(&s->mem, !s->core.autoselect);
 }
 
@@ -120,8 +118,13 @@ static void melco_amdflash_write_dev(MelcoAmdFlash *s, hwaddr addr,
     }
     if (melco_amdflash_core_write(&s->core, addr, value, size, &off, &len,
                                   &op)) {
-        /* The CPU may execute from this array (XIP): drop translated code. */
-        memory_region_flush_rom_device(&s->mem, off, len);
+        /* The CPU may execute from this array (XIP): drop translated code.
+         * Only an enabled romd window has translations to drop; while
+         * autoselect has it off the array is reached through MMIO, and
+         * memory_region_flush_rom_device() asserts in that state. */
+        if (memory_region_is_romd(&s->mem)) {
+            memory_region_flush_rom_device(&s->mem, off, len);
+        }
         if (off < s->dirty_lo) {
             s->dirty_lo = off;
         }
