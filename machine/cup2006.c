@@ -944,11 +944,7 @@ struct Cup2006MachineState {
     QEMUTimer *drf_save_timer;
     Notifier drf_exit;
     MemoryRegion bkram;          /* bkram=: battery RAM (rev >= 3) */
-    Notifier bkram_exit;
-    QEMUTimer *bkram_timer;
-    char *bkram_path;
     char *sramsave_path;         /* sramsave=: battery SRAM file */
-    uint8_t *bkram_last;         /* content of the last battery RAM save */
     uint8_t *sramsave_last;      /* content of the last battery SRAM save */
     Notifier sramsave_exit;
     QEMUTimer *sramsave_timer;

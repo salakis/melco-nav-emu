@@ -106,53 +106,22 @@ static void cup2006_battery_save(const char *path, const void *data,
     memcpy(*last, data, len);
 }
 
-static void cup2006_bkram_save(Cup2006MachineState *s)
-{
-    cup2006_battery_save(s->bkram_path,
-                         memory_region_get_ram_ptr(&s->bkram),
-                         CUP2006_BKRAM_SIZE, &s->bkram_last);
-}
-
-static void cup2006_bkram_exit(Notifier *n, void *data)
-{
-    Cup2006MachineState *s = container_of(n, Cup2006MachineState, bkram_exit);
-
-    cup2006_bkram_save(s);
-}
-
-static void cup2006_bkram_timer_cb(void *opaque)
-{
-    Cup2006MachineState *s = opaque;
-
-    cup2006_bkram_save(s);
-    timer_mod(s->bkram_timer, qemu_clock_get_ms(QEMU_CLOCK_REALTIME) + 2000);
-}
-
 static void cup2006_bkram_init(Cup2006MachineState *s, MemoryRegion *sysmem)
 {
     const char *path = s->bkram_file;
-    FILE *f;
+    struct stat st;
     size_t n = 0;
 
     if (!path || !path[0]) {
         return;
     }
-    s->bkram_path = g_strdup(path);
-    memory_region_init_ram(&s->bkram, NULL, "cup2006.bkram",
-                           CUP2006_BKRAM_SIZE, &error_fatal);
+    melco_nvram_init(&s->bkram, OBJECT(s), "cup2006.bkram", path,
+                     CUP2006_BKRAM_SIZE, 0x00);
     memory_region_add_subregion_overlap(sysmem, CUP2006_BKRAM_BASE,
                                         &s->bkram, 2);
-    f = fopen(path, "rb");
-    if (f) {
-        n = fread(memory_region_get_ram_ptr(&s->bkram), 1,
-                  CUP2006_BKRAM_SIZE, f);
-        fclose(f);
+    if (stat(path, &st) == 0) {
+        n = st.st_size;
     }
-    s->bkram_exit.notify = cup2006_bkram_exit;
-    qemu_add_exit_notifier(&s->bkram_exit);
-    s->bkram_timer = timer_new_ms(QEMU_CLOCK_REALTIME, cup2006_bkram_timer_cb,
-                                  s);
-    timer_mod(s->bkram_timer, qemu_clock_get_ms(QEMU_CLOCK_REALTIME) + 2000);
     trace_cup2006_flash_backup_ram_mib_bytes(CUP2006_BKRAM_BASE, path, n);
 }
 
