@@ -387,7 +387,6 @@ void cup2006_reg32_write(uint8_t *base, hwaddr addr, uint64_t value,
 #include "cup2006-2dg.c.inc"
 #include "cup2006-soc.c.inc"
 #include "cup2006-subcpu.c.inc"
-#include "cup2006-carsig.c.inc"
 #include "cup2006-ata.c.inc"
 #include "cup2006-audio.c.inc"
 
