@@ -377,7 +377,6 @@ void cup2006_reg32_write(uint8_t *base, hwaddr addr, uint64_t value,
     }
 }
 
-#include "cup2006-2dg.c.inc"
 
 static void cup2006_cpu_reset(void *opaque)
 {
