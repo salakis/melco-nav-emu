@@ -1,6 +1,8 @@
 # Proprietary / generated images: never commit
 images/*
 !images/README.md
+# scripts/extract-images.sh records which disc set the roots came from
+images/.disc-set
 *.iso
 *.ISO
 *.mds
@@ -31,6 +33,10 @@ __pycache__/
 *.egg-info/
 dist/
 .pytest_cache/
+
+# Agent worktrees (they hold multi-GB HDD images) and the internal plan
+.claude/
+PLAN-restructure.md
 
 # Editor / OS
 .DS_Store

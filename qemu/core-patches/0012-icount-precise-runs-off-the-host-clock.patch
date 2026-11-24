@@ -20,7 +20,8 @@ identical 30 s boots differed in their MMIO counts by up to 3%.
 With sleep=off the warp now happens only while the vCPU thread waits in
 rr_wait_io_event() (icount_vcpu_parked, set and cleared under the BQL),
 when every executed instruction is accounted.  The thread wakes the main
-loop as it parks, so the warp is not delayed.  sleep=on is unchanged.
+loop as it parks, so the warp is not delayed.  sleep=on is unchanged, and
+so is record/replay, whose warps come from the replay log.
 
 Also, with shift=N (ICOUNT_PRECISE) a vCPU slice no longer ends at the next
 QEMU_CLOCK_REALTIME deadline: that ended slices at host-dependent
@@ -37,7 +38,7 @@ instructions, and the code-TLB lookups after an exit can reach the guest
  
  void icount_start_warp_timer(void)
  {
-@@ -354,6 +355,19 @@
+@@ -354,6 +355,22 @@
           * QEMU_CLOCK_VIRTUAL.
           */
          if (!icount_sleep) {
@@ -49,9 +50,12 @@ instructions, and the code-TLB lookups after an exit can reach the guest
 +             * that slice's instructions and the warp would overshoot the
 +             * deadline by a host-timing-dependent amount.  Warp only while
 +             * the vCPU thread is parked; rr_wait_io_event() wakes the main
-+             * loop when it parks.
++             * loop when it parks.  Record/replay drives warps from its own
++             * log, and a host-timing-dependent rule there would make a
++             * recording undeterministic and change a replay, so its modes
++             * keep upstream behaviour.
 +             */
-+            if (!icount_vcpu_parked) {
++            if (replay_mode == REPLAY_MODE_NONE && !icount_vcpu_parked) {
 +                return;
 +            }
              /*

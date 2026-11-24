@@ -21,12 +21,12 @@ role of the `CUP2001E` modules is not modelled.
 | Audio | `0x07100100` | Playback DMA, PCM and KIWI voice decoding; host audio backend |
 | GPS UART | `0x07300000` | Receiver registers; position arrives over MOST |
 | MOST | OS8104 control port `0x07400000` | A Volvo vehicle peer, remote keys, North American settings, navigation GPS messages and sound-channel negotiation |
-| EEPROM window | `0x07800000` | Onboard EEPROM image plus MOST GPIO shadow |
+| EEPROM window | `0x07800000` | Erased (0xFF) RAM behind the EEPROM registers, plus the MOST GPIO shadow |
 | 16550 UART | `0x04800000` | Serial console |
 | Q2SD | UGM `0x10000000`, registers `0x11000000` | Q2SD display lists, palette, scanout and frame interrupts |
 | FLR window | `0x01a00000` | flr.dll's 256 KiB flash-loader window |
 | Selftest / RTC | `0xff93c000`, `0xffc80000` (alias `0x1fc80000`) | Board-revision ADC sample; real-time clock |
-| Nonvolatile state | XIP flash at `0x0` (alias `0x02000000`), battery SRAM at `0x12000000`, backup EEPROM at `0x18000000` | File-backed flash and battery SRAM. Other backup EEPROM windows are volatile approximations |
+| Nonvolatile state | XIP flash at `0x0` (alias `0x02000000`), battery SRAM at `0x12000000`, backup EEPROM at `0x18000000` | File-backed flash and battery SRAM. The other backup windows are volatile RAM, not EEPROM contents |
 
 The vehicle peer sends market `06` in FBlock `F5/2B2` and US English
 `11` in `F5/2C1`. The firmware's MOST handler reads those settings and

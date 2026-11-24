@@ -80,9 +80,11 @@ uint64_t cup2006_mbx_read(Cup2006MachineState *s, hwaddr base,
     hwaddr off = addr & (CUP2006_MBX_SIZE - 1);
     unsigned shift = (addr & 3) * 8;
     uint32_t value;
+    bool mbx_status_bits = false;
 
     /* Stored read-back, except +0x12C: the real status word. */
     value = s->mbx_window[off >> 2] >> shift;
+
     /* STUB: the TA run is done at the first status read after the
      * client's bit-4 ack; 64 reads without an ack also finish it. */
     /* STUB: bit 8 is re-raised at the first status read after the
@@ -90,11 +92,13 @@ uint64_t cup2006_mbx_read(Cup2006MachineState *s, hwaddr base,
     if (off == CUP2006_MBX_STATUS && s->mbx_b8_rearm) {
         s->mbx_b8_rearm = false;
         s->mbx_status |= CUP2006_MBX_ST_TA_KICK;
+        mbx_status_bits = true;
     }
     if (off == CUP2006_MBX_STATUS && s->mbx_ta_running &&
         (s->mbx_ta_acked || ++s->mbx_ta_reads > 64)) {
         s->mbx_ta_running = false;
         s->mbx_status |= CUP2006_MBX_ST_TA_DONE;
+        mbx_status_bits = true;
     }
     /* A render completes with bit 2 (render done) AND bit 6 (parameter
      * memory released). STUB: both bits at once, no timing. */
@@ -104,6 +108,12 @@ uint64_t cup2006_mbx_read(Cup2006MachineState *s, hwaddr base,
          * inferred. */
         s->mbx_status |= CUP2006_MBX_STATUS_DONE | CUP2006_MBX_ST_PM_READY |
                          CUP2006_MBX_ST_TA_KICK;
+        mbx_status_bits = true;
+    }
+    if (mbx_status_bits) {
+        /* A status bit set by a read is a 0 -> 1 transition like any other,
+         * so it must move the 0x900 line. */
+        cup2006_mbx_update_irq(s, "x12c-status-read");
     }
     if (off == CUP2006_MBX_STATUS) {
         value = s->mbx_status >> shift;
@@ -367,7 +377,7 @@ static void cup2006_du_report(Cup2006MachineState *s, unsigned plane)
     /*
      * Start the frame tick on the first complete plane setup so DSSR/DIER
      * and the scan-out are live.
- */
+     */
     cup2006_du_start(s);
 }
 

@@ -23,8 +23,8 @@ was checked from the guest setting its clock from GPS time.
 | `track.gpx` | the OSM geometry driven |
 | `route.json` | provenance: Overpass query, OSM data timestamp, way ids, heights, signal settings |
 
-Made with `tools/gps/osm_route.py --ref "I 80" --bbox 40.69,-114.00,40.80,-113.35
---seconds 180` and the pipeline in `tools/gps/README.md`; the GPS signal
+Made with `src/melco_nav_emu/gnss/osm_route.py --ref "I 80" --bbox 40.69,-114.00,40.80,-113.35
+--seconds 180` and the pipeline in `src/melco_nav_emu/gnss/README.md`; the GPS signal
 starts at GPS time 2009-09-09 09:09:15 (week 1548, TOW 292155).
 
 Map data © OpenStreetMap contributors, ODbL 1.0 (see scenarios/LICENSE).

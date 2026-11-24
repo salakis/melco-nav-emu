@@ -32,19 +32,31 @@ NK_GLOB = "CUP2006.SHx.*.nb0"
 # the car's position and throws (`LOC_MapCtl::MapSizeGet inf:1`, then
 # `MpRegionMapImp::Init`, JIT debugger, HMI starved) where its data is
 # missing; searches of the address/POI indexes find nothing past the prefix.
+# The value is validated when an image is built or booted, not at import, so a
+# typo cannot break the CLI's other commands.
 HDD_SET = os.environ.get("CUP2006_HDD_SET", "full")
-if HDD_SET not in ("full", "core"):
-    raise SystemExit("profile: CUP2006_HDD_SET must be 'full' or 'core', not %r"
-                     % HDD_SET)
-HDD = ROOT / ("build/hdd/hdd-native-verified.img" if HDD_SET == "full"
-              else "build/hdd/hdd-core.img")
 CORE_FULL = ["PAR_MNG.ME", "TMCINFO.ME", "VOICE001.ME", "0.2", "REGION.KWI",
              "PARCEL.KWI"]
-HDD_EMPTY = ROOT / "build/hdd/hdd-empty.img"
 MANIFEST = ROOT / "images/hdd-manifest.json"
 SCE = ROOT / "images/dvd1/P2006.SCE"
+# What `make extract` copied into images/dvd{1,2}: the disc set those roots
+# belong to (written by scripts/extract-images.sh).
+EXTRACTED_SET = ROOT / "images" / ".disc-set"
 BOOT_PART_MB = 64
 MAP_PART_MB = 3700
+
+
+def _escape(value: object) -> str:
+    """A value for one `key=value` pair of the comma-separated -M string."""
+    return str(value).replace(",", ",,")
+
+
+def _hdd_set() -> str:
+    """CUP2006_HDD_SET, checked at the point of use."""
+    if HDD_SET not in ("full", "core"):
+        raise SystemExit("cup2006: CUP2006_HDD_SET must be 'full' or 'core', "
+                         "not %r" % HDD_SET)
+    return HDD_SET
 
 # Installed paths that differ from the default naming rule (`*.IDX` under
 # `Map\IDX\`, everything else under `Map\`): the guest opens these CSV files
@@ -53,12 +65,52 @@ MAP_DEST = {"SYSDFEU.CSV": "Map\\IDX\\SYSDFEU.CSV",      # Europe disc set
             "SYSDFNA.CSV": "Map\\IDX\\SYSDFNA.CSV"}      # North America set
 
 
+def disc_set_id(disc, disc2=None) -> str:
+    """The name the two discs share, e.g. "EU-3350-00": their file name without
+    the `_1`/`_2` disc number and the extension."""
+    names = [Path(p).stem for p in (disc, disc2) if p is not None]
+    names = [n[:-2] if n.endswith(("_1", "_2")) else n for n in names]
+    # Discs whose file names share no stem keep both, so they stay distinct.
+    return names[0] if len(set(names)) == 1 else "+".join(names)
+
+
+def sibling_disc(disc, number=2) -> Path:
+    """Disc `number` of the set `disc` belongs to: its `_<n>` sibling in the
+    `disc<n>` directory next to `disc1` (`images/dvd/disc1/X_1.ISO` ->
+    `images/dvd/disc2/X_2.ISO`)."""
+    disc = Path(disc)
+    name = disc.name
+    if ("_%d." % number) not in name and ("_1." in name or "_2." in name):
+        name = name.replace("_1.", "_%d." % number).replace("_2.", "_%d." % number)
+    parent = disc.parent
+    if parent.name.endswith(("disc1", "disc2")):
+        parent = parent.with_name("disc%d" % number)
+    return parent / name
+
+
 # The two-disc set in the drive.  Defaults are the 2017-18 Europe retail
 # discs; CUP2006_DISC1/CUP2006_DISC2 point at another set (e.g. NA-2450-00).
 DISC = Path(os.environ.get(
-    "CUP2006_DISC1", str(ROOT / "images/dvd/disc1/EU-3350-00_1.ISO")))
-DISC2 = Path(os.environ.get(
-    "CUP2006_DISC2", str(ROOT / "images/dvd/disc2/EU-3350-00_2.ISO")))
+    "CUP2006_DISC1", str(ROOT / "images/dvd/disc1/EU-3350-00_1.ISO"))).resolve()
+DISC2 = Path(os.environ.get("CUP2006_DISC2",
+                            str(sibling_disc(DISC, 2))))
+
+
+# The built images belong to one disc set: each set gets its own directory, so
+# --disc (or another CUP2006_DISC1/CUP2006_DISC2) never boots one set's install
+# with another set's map identity.
+DISC_SET = disc_set_id(DISC, DISC2)
+
+
+def _hdd_paths():
+    """(product image, empty stand-in) for the disc set in the drive."""
+    directory = ROOT / "build" / "hdd" / DISC_SET
+    return (directory / ("hdd-native-verified.img" if HDD_SET != "core"
+                         else "hdd-core.img"),
+            directory / "hdd-empty.img")
+
+
+HDD, HDD_EMPTY = _hdd_paths()
 
 
 def find_nk(firmware=None) -> Path:
@@ -68,9 +120,9 @@ def find_nk(firmware=None) -> Path:
     if len(found) == 1:
         return found[0]
     if not found:
-        raise SystemExit("profile: no NK image (%s) in %s; run `make extract "
+        raise SystemExit("cup2006: no NK image (%s) in %s; run `make extract "
                          "flatten` first" % (NK_GLOB, firmware))
-    raise SystemExit("profile: several NK images in %s (%s); keep only the "
+    raise SystemExit("cup2006: several NK images in %s (%s); keep only the "
                      "one carved from the disc set in use, or delete the "
                      "directory and run `make flatten` again"
                      % (firmware, ", ".join(p.name for p in found)))
@@ -101,13 +153,28 @@ def _build_map_hdd():
             "--manifest", str(MANIFEST)]
     for name, path in MAP_DEST.items():
         args += ["--dest", "%s=%s" % (name, path)]
-    if HDD_SET == "full":
+    if _hdd_set() == "full":
         full = [t["name"] for t in json.loads(MANIFEST.read_text())["targets"]]
     else:
         full = CORE_FULL
     for name in full:
         args += ["--full", name]
     build_atomically(HDD, args)
+
+
+def _check_extracted_set():
+    """The extracted disc roots are one set's too; refuse to mix them with
+    another set in the drive."""
+    if not EXTRACTED_SET.is_file():
+        return                       # extracted before this record existed
+    recorded = EXTRACTED_SET.read_text().strip()
+    if recorded and recorded != DISC_SET:
+        raise SystemExit(
+            "cup2006: images/dvd1 and images/dvd2 were extracted from disc set "
+            "%s, but the drive holds %s.  Run `make extract flatten hdd` for "
+            "the set in the drive (or set CUP2006_DISC1/CUP2006_DISC2 back), "
+            "so the firmware, install manifest and map identity match the "
+            "discs." % (recorded, DISC_SET))
 
 
 # Where the guest's map manager looks for the installed map identity
@@ -177,8 +244,8 @@ def hdd_map_problem(path) -> "str | None":
 
 
 def _warn_no_map(path, problem):
-    print("profile: WARNING: the HDD %s (%s) has no installed map: %s.\n"
-          "profile: the guest will stop on \"Disc unavailable ... Please insert "
+    print("cup2006: WARNING: the HDD %s (%s) has no installed map: %s.\n"
+          "cup2006: the guest will stop on \"Disc unavailable ... Please insert "
           "Disc 1\" after the disclaimer.  Delete it and boot again to build "
           "the map HDD from the discs." % (path, Path(path).resolve(), problem),
           file=sys.stderr)
@@ -193,6 +260,7 @@ def ensure_hdd() -> Path:
     map file opens fail and the map screen waits); the real image is built
     at the first boot after they appear.
     """
+    _hdd_set()
     if HDD.exists():
         problem = hdd_map_problem(HDD)
         if problem:
@@ -207,7 +275,7 @@ def ensure_hdd() -> Path:
     if not missing:
         _build_map_hdd()
         return HDD
-    print("profile: missing %s.\nprofile: booting with an EMPTY map partition "
+    print("cup2006: missing %s.\ncup2006: booting with an EMPTY map partition "
           "(%s); the map cannot load.  Put the disc ISOs in place (or set "
           "CUP2006_DISC1/CUP2006_DISC2) and run `make extract hdd`: the real "
           "HDD is then built at the next boot." % (", ".join(missing), HDD_EMPTY),
@@ -245,9 +313,9 @@ def _machine_opts():
     opts = ["cup2006", "selftest=on", "intcinit=on", "rtc=on", "ata=on",
             "subpeer=on", "dvd5irq=on", "carsig=on", "acckey=on"]
     if DISC.is_file():
-        opts.append("dvdimage=%s" % DISC)
+        opts.append("dvdimage=%s" % _escape(DISC))
     if DISC.is_file() and DISC2.is_file():
-        opts.append("dvdnext=%s" % DISC2)
+        opts.append("dvdnext=%s" % _escape(DISC2))
     opts.append("carmarket=%s" % CARMARKET)
     if os.environ.get("CUP2006_CARMARKER", "") not in ("", "0"):
         opts.append("carmarker=on")
@@ -258,12 +326,21 @@ MACHINE = _machine_opts()
 
 
 def _set_disc(disc):
-    """Override the disc set at runtime (--disc / MELCO_DISC): disc 1, with
-    disc 2 as its _2 sibling when that file exists."""
-    global DISC, DISC2, CARMARKET, MACHINE
-    DISC = Path(disc)
-    name = DISC.name
-    DISC2 = Path(str(DISC).replace("_1.", "_2.")) if "_1." in name else DISC
+    """Select the disc set at runtime (--disc / MELCO_DISC): disc 1, with disc
+    2 from CUP2006_DISC2 or its `_2` sibling under `disc2/`.
+
+    The set is one unit of media: the virtual HDD, the market byte and the
+    rest of the machine options follow it, because the install layout, the map
+    identity and the region all come from the discs."""
+    global DISC, DISC2, DISC_SET, HDD, HDD_EMPTY, CARMARKET, MACHINE
+    DISC = Path(disc).resolve()
+    # CUP2006_DISC2 names disc 2 of its own set: keep it when it belongs to
+    # this disc 1, else take the `_2` sibling.
+    env2 = os.environ.get("CUP2006_DISC2")
+    DISC2 = (Path(env2) if env2 and disc_set_id(DISC, env2) == disc_set_id(DISC)
+             else sibling_disc(DISC, 2)).resolve()
+    DISC_SET = disc_set_id(DISC, DISC2)
+    HDD, HDD_EMPTY = _hdd_paths()
     CARMARKET = os.environ.get("CUP2006_CARMARKET",
                                "06" if "NA-" in DISC.name else "04")
     MACHINE = _machine_opts()
@@ -355,9 +432,10 @@ def gps_machine():
     replay, sensors = scenario / "drive.replay", scenario / "sensors.csv"
     missing = [p.name for p in (replay, sensors) if not p.is_file()]
     if missing:
-        raise SystemExit("profile: CUP2006_SCENARIO=%s, but %s has no %s"
+        raise SystemExit("cup2006: CUP2006_SCENARIO=%s, but %s has no %s"
                          % (name, scenario, " or ".join(missing)))
-    return ["gnssreplay=%s" % replay, "gpstrack=%s" % sensors]
+    return ["gnssreplay=%s" % _escape(replay),
+            "gpstrack=%s" % _escape(sensors)]
 
 
 def unit_hdd(unit) -> Path:
@@ -372,9 +450,12 @@ def unit_machine(unit, hdd):
     (melco_nav_emu/unit.py: flash, battery RAM, battery SRAM, onboard EEPROM) and
     disk."""
     unit = Path(unit)
-    opts = ["hwrevadc=410", "drfimage=%s" % (unit / "flash.img"),
-            "bkram=%s" % (unit / "bkram.bin"), "sramsave=%s" % (unit / "sram.bin"),
-            "eeprom=%s" % (unit / "eeprom.bin"), "hddimage=%s" % hdd]
+    opts = ["hwrevadc=410",
+            "drfimage=%s" % _escape(unit / "flash.img"),
+            "bkram=%s" % _escape(unit / "bkram.bin"),
+            "sramsave=%s" % _escape(unit / "sram.bin"),
+            "eeprom=%s" % _escape(unit / "eeprom.bin"),
+            "hddimage=%s" % _escape(hdd)]
     # A unit with its own disk keeps the guest's writes in it.
     if Path(hdd) == unit / "hdd.img":
         opts.append("hddwrite=on")
@@ -403,7 +484,7 @@ def audiodev_id(extra):
 
 def _argv(unit, display, serial, extra, hdd):
     if not QEMU.is_file():
-        raise SystemExit("profile: %s not found; run `make qemu` first" % QEMU)
+        raise SystemExit("cup2006: %s not found; run `make qemu` first" % QEMU)
     machine = _machine_opts() + unit_machine(unit, hdd) + gps_machine()
     extra = [str(a) for a in extra]
     # Sound (machine/cup2006-audio.c.inc): a window run plays through the
@@ -413,7 +494,7 @@ def _argv(unit, display, serial, extra, hdd):
     if any(a == "-audiodev" or a.startswith("-audiodev=") for a in extra):
         audio_id = audiodev_id(extra)
         if audio_id is None:
-            raise SystemExit("profile: -audiodev given without an id=..., so "
+            raise SystemExit("cup2006: -audiodev given without an id=..., so "
                              "the machine's audiodev= cannot name it")
         machine.append("audiodev=%s" % audio_id)
     elif display.startswith("cocoa"):
@@ -465,7 +546,7 @@ def first_power_on(unit, timeout=120, hdd=None):
     argv = _argv(unit, "none", (os.devnull,), (), hdd)
     bkram = unit / "bkram.bin"
     log = unit / FIRST_POWER_ON_LOG
-    print("profile: first power-on of %s: letting the unit format its backup "
+    print("cup2006: first power-on of %s: letting the unit format its backup "
           "memory (once, up to %d s; log: %s)..." % (unit, timeout, log),
           file=sys.stderr)
     with log.open("wb") as out:
@@ -489,23 +570,19 @@ def first_power_on(unit, timeout=120, hdd=None):
     if exited is not None:
         tail = log.read_text(errors="replace").splitlines()[-20:]
         raise SystemExit(
-            "profile: QEMU exited with code %d during the first power-on of "
+            "cup2006: QEMU exited with code %d during the first power-on of "
             "%s, before the guest formatted its battery RAM.  Last lines of "
             "%s:\n%s" % (exited, unit, log, "\n".join(tail)))
     (unit / POWERED_ON).write_text(
         "first power-on ran %d s without the guest formatting its battery "
         "RAM APM area; delete this file to try again\n" % timeout)
-    print("profile: WARNING: the guest did not format its battery RAM APM "
+    print("cup2006: WARNING: the guest did not format its battery RAM APM "
           "area within %d s, so the map-install record could not be landed "
           "(different firmware with another APM version date?).  The unit "
           "boots as the guest leaves it; this power-on is not repeated "
           "(delete %s to retry)." % (timeout, unit / POWERED_ON),
           file=sys.stderr)
     return False
-
-
-def _escape(value: object) -> str:
-    return str(value).replace(",", ",,")
 
 
 def _default_unit() -> Path:
@@ -523,6 +600,7 @@ def prepare(unit, args=None) -> dict:
         if getattr(args, "qemu", None):
             global QEMU
             QEMU = Path(args.qemu)
+    _check_extracted_set()
     unit = Path(unit) if unit is not None else _default_unit()
     if not unit.is_absolute():
         unit = ROOT / unit
@@ -538,12 +616,3 @@ def qemu_argv(media: dict, *, display="cocoa,zoom-to-fit=on",
     if qmp is not None:
         argv += ["-qmp", "unix:%s,server=on,wait=off" % _escape(qmp)]
     return argv
-
-
-def default_display() -> str:
-    """The window backend when DISPLAY_BACKEND is unset: cocoa on macOS,
-    sdl elsewhere (cocoa does not exist off Darwin, so `make boot` would
-    fail on Linux)."""
-    if os.environ.get("DISPLAY_BACKEND"):
-        return os.environ["DISPLAY_BACKEND"]
-    return "cocoa,zoom-to-fit=on" if sys.platform == "darwin" else "sdl"

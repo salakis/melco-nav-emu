@@ -1,9 +1,9 @@
-Subject: [PATCH 0008]
+Subject: [PATCH 0008] sh4: return to the main loop after a delay slot that starts a TB
+
 # melco-nav-emu core patch.
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Copyright (c) 2026 melco-nav-emu contributors
 # Modifies GPL-licensed QEMU sources; applied by scripts/qemu.sh.
- sh4: return to the main loop after a delay slot that starts a TB
 
 `rte` ends its TB before the delay slot (DISAS_STOP), so the slot runs in a
 TB of its own that is entered from the main loop.  That loop's interrupt

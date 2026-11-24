@@ -78,30 +78,29 @@ static void cup28_most_flush_peer_q(Cup28MachineState *s)
 {
     uint8_t *r = s->p28_most_registers[0];
 
-    while (s->p28_most_peer_q_count) {
-        unsigned i = s->p28_most_peer_q_head;
+    while (s->p28_most_peer_q && !g_queue_is_empty(s->p28_most_peer_q)) {
+        GByteArray *held = g_queue_peek_head(s->p28_most_peer_q);
+        unsigned len = MIN(held->len, CUP28_MOST_MSG_MAX);
 
         if (!(r[0x86] & 0x80) && !s->p28_most_q_count) {
-            cup28_most_write_rcmb(s, s->p28_most_peer_q[i],
-                                  s->p28_most_peer_q_len[i]);
+            cup28_most_write_rcmb(s, held->data, len);
         } else if (s->p28_most_q_count < G_N_ELEMENTS(s->p28_most_q)) {
             unsigned j = (s->p28_most_q_head + s->p28_most_q_count++) %
                          G_N_ELEMENTS(s->p28_most_q);
-            memcpy(s->p28_most_q[j], s->p28_most_peer_q[i],
-                   s->p28_most_peer_q_len[i]);
-            s->p28_most_q_len[j] = s->p28_most_peer_q_len[i];
+            memcpy(s->p28_most_q[j], held->data, len);
+            s->p28_most_q_len[j] = len;
         } else {
             break;
         }
-        s->p28_most_peer_q_head = (i + 1) % G_N_ELEMENTS(s->p28_most_peer_q);
-        s->p28_most_peer_q_count--;
+        g_byte_array_unref(g_queue_pop_head(s->p28_most_peer_q));
     }
 }
 
 /* STUB: the vehicle peer retransmits while the node's single receive buffer
  * (mRCMB, OS8104 13.2.6) is still locked, modelled as a small FIFO that is
  * drained one message per RBE unlock.  When that FIFO is full the peer holds
- * its message back in p28_most_peer_q instead of dropping it. */
+ * its message back in p28_most_peer_q (which grows) instead of dropping it:
+ * dropping a handshake reply would stall the vehicle handshake for good. */
 static void cup28_most_receive(Cup28MachineState *s, const uint8_t *message,
                                size_t length)
 {
@@ -120,12 +119,10 @@ static void cup28_most_receive(Cup28MachineState *s, const uint8_t *message,
                      G_N_ELEMENTS(s->p28_most_q);
         memcpy(s->p28_most_q[i], message, length);
         s->p28_most_q_len[i] = length;
-    } else if (s->p28_most_peer_q_count < G_N_ELEMENTS(s->p28_most_peer_q)) {
-        unsigned i = (s->p28_most_peer_q_head + s->p28_most_peer_q_count++) %
-                     G_N_ELEMENTS(s->p28_most_peer_q);
-        memcpy(s->p28_most_peer_q[i], message, length);
-        s->p28_most_peer_q_len[i] = length;
     } else {
+        g_queue_push_tail(s->p28_most_peer_q,
+                          g_byte_array_new_take(g_memdup2(message, length),
+                                                length));
         trace_cup28_most_peer_hold_back_queue();
     }
 }
@@ -738,17 +735,13 @@ static void cup28_most_gps_tick(void *opaque)
 
 void cup28_most_init(Cup28MachineState *s, MemoryRegion *mem, SuperHCPU *cpu)
 {
-    struct intc_desc *desc = cpu->env.intc_handle;
-    for (unsigned i = 0; desc && i < desc->nr_sources; i++) {
-        if (desc->sources[i].vect == 0x680) {
-            s->p28_most_src = &desc->sources[i];
-            s->p28_most_src->vect = 0x2a0;
-        } else if (desc->sources[i].vect == 0x6a0) {
-            s->p28_most_chip_src = &desc->sources[i];
-            s->p28_most_chip_src->vect = 0x380;
-        } else if (desc->sources[i].vect == 0x3a0) {
-            s->p28_most_async_src = &desc->sources[i];
-        }
+    s->p28_most_peer_q = g_queue_new();
+    s->p28_most_src = cup28_intc_source(cpu, CUP28_INTEVT_MOST);
+    s->p28_most_chip_src = cup28_intc_source(cpu, CUP28_INTEVT_MOST_CHIP);
+    s->p28_most_async_src = cup28_intc_source(cpu, CUP28_INTEVT_MOST_ASYNC);
+    if (!s->p28_most_src || !s->p28_most_chip_src || !s->p28_most_async_src) {
+        error_report("cup28: no INTC source for the MOST interrupts");
+        exit(1);
     }
     s->p28_most_registers[0][0x80] = 0x20; /* bXCR reset, manual p.37 */
     s->p28_most_registers[0][0x81] = 0x50; /* bXSR reset, manual p.38 */

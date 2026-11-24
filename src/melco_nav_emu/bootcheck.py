@@ -37,9 +37,9 @@ OUT_BASE = ROOT / "build" / "bootcheck"
 # A pristine per-board unit to copy, if present (template/<board>/unit).
 TEMPLATE = OUT_BASE / "template"
 
-# Per-board defaults (chosen in spike S2, phase 0.2).  cup2006's headless
-# serial console prints almost nothing, so its boot progress is judged from
-# screendumps; cup28 logs console milestones (below).
+# Per-board defaults.  cup2006's headless serial console prints almost
+# nothing, so its boot progress is judged from screendumps; cup28 logs console
+# milestones (below).
 DEFAULTS = {
     "cup2006": {
         # Times are guest virtual seconds (QEMU_CLOCK_VIRTUAL; see
@@ -57,7 +57,7 @@ DEFAULTS = {
         "scenario": None,
         # With the launcher's shift=auto,sleep=on the serial-poll MMIO count
         # varies by more than the compare tolerance between identical boots;
-        # a fixed shift makes the run deterministic (spike S2).
+        # a fixed shift makes the run deterministic.
         "icount": "shift=3,sleep=off",
     },
     "cup28": {
@@ -110,6 +110,10 @@ def _board_argv(board_name: str, unit: Path, outdir: Path,
     and the board's prepared media."""
     from . import boards
     board = boards.get(board_name)
+    if disc:
+        # QEMU runs in the output directory, so a relative --disc would name a
+        # different file there.
+        disc = str(Path(disc).resolve())
     if board_name == "cup2006" and scenario:
         # The cup2006 launcher takes a scenario by name (scenarios/<name>/ or
         # build/gps/<name>/), so name it; the launcher adds gnssreplay= and

@@ -1,6 +1,7 @@
 /*
  * Volvo VNS CUP28 board: internal header shared by cup28.c and the
- * per-device cup28-*.c files (SPDX: GPL-2.0-or-later).
+ * per-device cup28-*.c files.
+ * SPDX-License-Identifier: GPL-2.0-or-later
  * Copyright (c) 2026 melco-nav-emu contributors
  */
 
@@ -55,6 +56,24 @@ OBJECT_DECLARE_SIMPLE_TYPE(Cup28MachineState, CUP28_MACHINE)
 #define CUP28_RTC_A7_BASE     0x1fc80000
 #define CUP28_RTC_SIZE        0x00000100
 #define CUP28_RTC_EPOCH       1252487349  /* 2009-09-09 09:09:09 UTC */
+#define CUP28_MOST_MSG_MAX    17        /* largest mRCMB message modelled */
+
+/*
+ * INTEVTs of the board's own interrupt lines.  On the SH7750R the IRL pins
+ * autovector to 0x200, 0x220, ... 0x3c0, and the drivers hook exactly those
+ * numbers (HookInterrupt index n = INTEVT), so each board device takes the
+ * source whose vector is its INTEVT.  cup28_intc_source() in cup28.c looks
+ * one up; none of them borrows an on-chip peripheral (a timer or a DMAC
+ * channel) that the guest may drive itself.
+ */
+#define CUP28_INTEVT_GPS_TX    0x200    /* IRL_0 */
+#define CUP28_INTEVT_DVD_MLD   0x260    /* IRL_3 */
+#define CUP28_INTEVT_DVD_NK    0x280    /* IRL_4 */
+#define CUP28_INTEVT_MOST      0x2a0    /* IRL_5 */
+#define CUP28_INTEVT_Q2        0x2e0    /* IRL_7 */
+#define CUP28_INTEVT_SNS       0x340    /* IRL_A */
+#define CUP28_INTEVT_MOST_CHIP 0x380    /* IRL_C */
+#define CUP28_INTEVT_MOST_ASYNC 0x3a0   /* IRL_D */
 
 struct Cup28MachineState {
     MachineState parent_obj;
@@ -125,10 +144,10 @@ struct Cup28MachineState {
     unsigned p28_most_q_head, p28_most_q_count;
     /* Peer-side hold-back queue: while the node FIFO is full, the emulated
      * vehicle peer keeps its own messages here and delivers them as the
-     * guest drains, instead of dropping them. */
-    uint8_t p28_most_peer_q[64][17];
-    uint8_t p28_most_peer_q_len[64];
-    unsigned p28_most_peer_q_head, p28_most_peer_q_count;
+     * guest drains.  It grows instead of dropping a message: a lost
+     * handshake reply would leave the guest waiting for ever.  Entries are
+     * CUP28_MOST_MSG_MAX-byte GByteArrays. */
+    GQueue *p28_most_peer_q;
     bool p28_most_gps_on, p28_most_navsys_listed;
     unsigned p28_most_gps_log;
     uint8_t p28_most_gps_last_position[8];
@@ -136,12 +155,12 @@ struct Cup28MachineState {
     bool p28_most_wheel_on, p28_most_vc_complete;
     uint8_t p28_most_wheel_counter;
     QEMUTimer *p28_most_gps_timer;
-    /* CUP28 GPS receiver UART (cup28-gps.c.inc) */
+    /* CUP28 GPS receiver UART (cup28-gps.c) */
     MemoryRegion p28_gps_io;
     struct intc_source *p28_gps_tx_src;
     uint8_t p28_gps_ier, p28_gps_lcr, p28_gps_mcr, p28_gps_scr;
     uint8_t p28_gps_dll, p28_gps_dlm;
-    /* CUP28 dead-reckoning sampler (cup28-gps.c.inc) */
+    /* CUP28 dead-reckoning sampler (cup28-gps.c) */
     struct intc_source *p28_sns_src;
     QEMUTimer *p28_sns_timer;
     MemoryRegion p28_pulse_io;
@@ -179,6 +198,9 @@ extern const MemoryRegionOps cup28_q2_ops;
 void cup28_audio_init(Cup28MachineState *s, MemoryRegion *mem,
                        const char *audiodev);
 void cup28_bksram_init(Cup28MachineState *s);
+
+/* The INTC source that raises `intevt` (one of the CUP28_INTEVT_* lines). */
+struct intc_source *cup28_intc_source(SuperHCPU *cpu, unsigned intevt);
 void cup28_dmac_init(Cup28MachineState *s, MemoryRegion *sysmem,
                      SuperHCPU *cpu);
 void cup28_dmac_try(Cup28MachineState *s);

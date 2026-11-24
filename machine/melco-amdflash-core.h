@@ -26,6 +26,7 @@ enum {
     MELCO_AMDFLASH_ST_ERASE,        /* AA 55 80 */
     MELCO_AMDFLASH_ST_ERASE_U1,     /* AA 55 80 AA */
     MELCO_AMDFLASH_ST_ERASE_ARMED,  /* AA 55 80 AA 55: 30/10 erase */
+    MELCO_AMDFLASH_ST_BYPASS_EXIT,  /* 90 in bypass: 00 leaves it */
 };
 
 /*
@@ -45,11 +46,9 @@ typedef struct MelcoAmdFlashCore {
 
     unsigned state;
     bool bypass;                /* unlock bypass entered (AA 55 20) */
-    bool autoselect;            /* 90 seen: the bank base holds the IDs */
+    bool autoselect;            /* 90 seen: reads of the bank serve the IDs */
     uint64_t autoselect_bank;
-    bool program_pending;       /* A0 seen: next write at program_addr is data */
-    uint64_t program_addr;
-    uint8_t id_save[16];        /* array bytes saved while autoselect is on */
+    bool program_pending;       /* A0 seen: the next write is the data */
 } MelcoAmdFlashCore;
 
 void melco_amdflash_core_init(MelcoAmdFlashCore *c, uint8_t *data,
@@ -67,7 +66,11 @@ bool melco_amdflash_core_write(MelcoAmdFlashCore *c, uint64_t addr,
                                uint64_t *off, uint64_t *len,
                                MelcoAmdFlashOp *op);
 
-/* Read callback: serves the ID block in autoselect mode, the array else. */
+/*
+ * Read callback: serves the ID block at the autoselect bank base while
+ * autoselect is on, the array else.  The array itself is never touched, so a
+ * backing file written at any time holds the real contents.
+ */
 uint64_t melco_amdflash_core_read(MelcoAmdFlashCore *c, uint64_t addr,
                                   unsigned size);
 

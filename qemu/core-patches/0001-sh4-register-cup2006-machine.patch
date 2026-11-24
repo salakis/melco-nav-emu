@@ -5,9 +5,12 @@ Subject: [PATCH 0001] sh4: register the cup2006 machine
 # Copyright (c) 2026 melco-nav-emu contributors
 # Modifies GPL-licensed QEMU sources; applied by scripts/qemu.sh.
 
-Build hw/sh4/cup2006.c (the Volvo RTI MMM+ / CU-P2006 board, from the
-machine/ directory of melco-nav-emu) into qemu-system-sh4, plus the
-shared melco-nvram.c / melco-amdflash.c under CONFIG_MELCO_COMMON.
+Build the Volvo RTI MMM+ (CU-P2006) board from the machine/ directory of
+melco-nav-emu into qemu-system-sh4: cup2006.c and its cup2006-*.c devices
+under CONFIG_CUP2006, and the shared back ends it uses (melco-nvram.c,
+melco-amdflash.c with melco-amdflash-core.c, melco-sensors.c with
+melco-sensors-core.c) under CONFIG_MELCO_COMMON.  scripts/qemu.sh links
+machine/*.c into hw/sh4/; this patch only registers them in the build.
 
 --- a/hw/sh4/Kconfig
 +++ b/hw/sh4/Kconfig

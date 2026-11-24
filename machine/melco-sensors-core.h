@@ -20,7 +20,7 @@ typedef struct MelcoSample {
 typedef struct MelcoTrack MelcoTrack;   /* opaque */
 
 /*
- * Strict CSV loader (moved unchanged from cup28-track.c.inc): header
+ * Strict CSV loader: header
  * "t_s,lat_deg,lon_deg,alt_m,speed_kmh,heading_deg,yaw_dps,gps", one row
  * per sample, evenly spaced, at least 2 rows.  On error returns NULL and
  * writes a message ("invalid track '<path>' at line N" or

@@ -102,6 +102,26 @@ int main(void)
     assert(s->lat_deg == 10.2 && s->speed_kmh == 0.0 && !s->fix);
     melco_track_free(t);
 
+    /* a track whose last line has no trailing newline: the loader stops at
+     * the end of the file instead of reading on past the buffer */
+    write_csv("nonl.csv",
+              "t_s,lat_deg,lon_deg,alt_m,speed_kmh,heading_deg,yaw_dps,gps\n"
+              "0.0,10.0,20.0,30.0,36.0,90.0,5.0,1\n"
+              "0.1,10.1,20.1,31.0,72.0,91.0,6.0,1");
+    t = load("nonl.csv", err, sizeof(err));
+    assert(t);
+    assert(melco_track_rows(t) == 2);
+    assert(melco_track_interval_ms(t) == 100);
+    melco_track_free(t);
+
+    /* a last line cut short is reported, not parsed past the buffer */
+    write_csv("cut.csv",
+              "t_s,lat_deg,lon_deg,alt_m,speed_kmh,heading_deg,yaw_dps,gps\n"
+              "0.0,10.0,20.0,30.0,36.0,90.0,5.0,1\n"
+              "0.1,10.1,20.0,30.0");
+    assert(!load("cut.csv", err, sizeof(err)));
+    assert(strstr(err, "at line 3"));
+
     /* odometer over two samples: 36 km/h for 100 ms = 1 m, then 72 km/h
      * for 100 ms = 2 m (3 m in total); past the end it stops integrating */
     t = load("good.csv", err, sizeof(err));

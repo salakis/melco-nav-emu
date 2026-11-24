@@ -164,7 +164,9 @@ OBJECT_DECLARE_SIMPLE_TYPE(Cup2006MachineState, CUP2006_MACHINE)
 #define CUP2006_DU_DSSR_RINT     0x00000200
 #define CUP2006_DU_DSSR_HBK      0x00000100
 #define CUP2006_DU_DSSR_RESERVED 0x30000000  /* bits 29,28 read as 1 */
-#define CUP2006_DU_DIER_MASK     0x00008f00
+/* The enables mirror the DSSR flag bits (TVR 15, FRM 14, VBK 11, RINT 9,
+ * HBK 8), so a guest that enables only one flag gets exactly that one. */
+#define CUP2006_DU_DIER_MASK     0x0000cb00
 #define CUP2006_DU_FRAME_NS      100000000ull /* STUB: 10 Hz frame tick */
 #define CUP2006_DU_FLAG_HOLD_NS  5000000ull
 #define CUP2006_DU_CONSOLE_W     400
@@ -405,14 +407,14 @@ struct Cup2006MachineState {
     bool dvd5_spinup_pending;
     bool dvd5_disc_ready;
     bool dvd5_rx_unsol;      /* the staged bytes are an unsolicited frame */
-    /* The drive's eject button and disc slot (F11; cup2006-dvd.c.inc). */
+    /* The drive's eject button and disc slot (F11; cup2006-dvd.c). */
     bool dvd5_ejected;       /* the open disc sits ejected in the slot */
     bool dvd_shutter_open;   /* F10: the disc-insert shutter is open */
     char **dvd_discs;        /* dvdimage= then each dvdnext= disc */
     unsigned dvd_ndiscs;
     unsigned dvd_next;       /* index of the next disc to insert */
     QEMUTimer *dvd_insert_timer;
-    /* Sound: SSI + its DMA channel (cup2006-audio.c.inc). */
+    /* Sound: SSI + its DMA channel (cup2006-audio.c). */
     MemoryRegion ssi_regs;
     MemoryRegion ssi_a7_regs;
     MemoryRegion adma_regs;
@@ -510,7 +512,7 @@ struct Cup2006MachineState {
      * Per-slot opaque: a MemoryRegionOps callback gets the offset inside its
      * region, not the window address, so the slot identity has to come from
      * the opaque pointer.
- */
+     */
     Cup2006PccRegs pcc_regs_opaque[CUP2006_PCC_SLOTS];
     /* bit0/bit1: a read/write of this offset has been logged once. */
     uint8_t pcc_seen[CUP2006_PCC_SLOTS][CUP2006_PCC_REGS_SIZE];
@@ -613,8 +615,10 @@ struct Cup2006MachineState {
     bool gps_handshake;            /* 0xA5 reset written, state reads 1 */
     uint64_t gps_ticks;
     MelcoTrack *track;             /* car-sensor track (melco-sensors.c) */
-    int64_t gps_track_start_ms;    /* scenario clock start, shared with the
-                                    * GNSS radio replay (gnssreplay=) */
+    bool track_clock_started;      /* the scenario clock start was taken, so
+                                    * the wheel and gyro feeds may read the
+                                    * track; shared with the GNSS radio replay
+                                    * (gnssreplay=) */
     /* Measurement-level GNSS feed: host-assigned PRN per channel. */
     int gnss_chan_prn[12];         /* PRN 1..32, 0 = unassigned */
     /* RCD remote-control window at 0xFF937000 (STUB shadow). */
@@ -668,12 +672,13 @@ struct Cup2006MachineState {
     /*
      * the completion interrupt is gated by the guest's INTC2 enable
      * bit for the 0x8C0 line (0xFFE00044 bit 20), like the device does.
- */
+     */
     uint64_t dg_disabled_jobs;
     /* list executor counters (pixels written from guest commands). */
     uint64_t dg_blits;
     uint64_t dg_skipped;
     uint64_t dg_work_ops;           /* work-plane pixel ops in this job */
+    uint64_t dg_frame_ops;          /* frame-plane pixel ops in this job */
     int64_t draw_t0_ms;                /* 2DG log timestamps */
     struct {
         bool valid;
@@ -815,7 +820,7 @@ extern const MemoryRegionOps cup2006_uart_ops;
 extern const MemoryRegionOps cup2006_unknown_ops;
 
 /* Functions called across files (non-static, cup2006_ prefix kept). */
-hwaddr cpu_get_phys_page_debug(CPUState *cpu, vaddr addr);
+hwaddr cup2006_phys_page_debug(CPUState *cpu, vaddr addr);
 void cup2006_adma_ack(Cup2006MachineState *s);
 void cup2006_ata_exit(Notifier *n, void *data);
 void cup2006_ata_irq_fire(void *opaque);
@@ -861,6 +866,7 @@ void cup2006_scif0_tx_tick(void *opaque);
 void cup2006_scif_rx_tick(void *opaque);
 void cup2006_sramsave_init(Cup2006MachineState *s, MemoryRegion *sysmem);
 void cup2006_track_clock_start(Cup2006MachineState *s, int64_t now_ms);
+bool cup2006_gps_enabled(const Cup2006MachineState *s);
 uint64_t cup2006_unknown_read(void *opaque, hwaddr addr, unsigned size);
 void cup2006_unknown_write(void *opaque, hwaddr addr, uint64_t value, unsigned size);
 void cup2006_wheel_tick(void *opaque);

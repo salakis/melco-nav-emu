@@ -32,6 +32,8 @@ void cup28_register_write(uint8_t *regs, hwaddr addr, uint64_t value,
 }
 
 
+/* STUB: the M-loader's own entry point is not modelled, so a CPU reset starts
+ * the guest's firmware entry (0x80080004 = LOAD_ADDRESS + 4) directly. */
 static void cup28_reset_cpu(void *opaque)
 {
     SuperHCPU *cpu = opaque;
@@ -160,6 +162,26 @@ static void cup28_flash_init(Cup28MachineState *s, MemoryRegion *mem,
                                         &s->drf_alias_regs, 1);
 }
 
+/*
+ * The board's devices interrupt through the CPU's IRL pins: the SH7750R
+ * autovectors IRL_0 .. IRL_E to 0x200, 0x220, ... 0x3c0 and the guest's
+ * HookInterrupt entries use exactly those numbers.  Taking the source whose
+ * vector is already the INTEVT means no on-chip peripheral (a timer or a DMAC
+ * channel the guest may drive itself) is borrowed and nothing is re-vectored.
+ */
+struct intc_source *cup28_intc_source(SuperHCPU *cpu, unsigned intevt)
+{
+    struct intc_desc *desc = cpu->env.intc_handle;
+    unsigned i;
+
+    for (i = 0; desc && i < desc->nr_sources; i++) {
+        if (desc->sources[i].vect == intevt) {
+            return &desc->sources[i];
+        }
+    }
+    return NULL;
+}
+
 static void cup28_storage_init(Cup28MachineState *s, MemoryRegion *mem,
                                SuperHCPU *cpu)
 {
@@ -178,20 +200,17 @@ static void cup28_storage_init(Cup28MachineState *s, MemoryRegion *mem,
         s->dvd_size = st.st_size;
     }
 
-    for (unsigned i = 0; i < intc->nr_sources; i++) {
-        struct intc_source *src = &intc->sources[i];
-
-        /* The loader and NK program different DVD CPLD priorities. */
-        if (src->vect == 0xb80) {
-            src->vect = 0x280;
-            src->prio = 3;
-            src->parent = intc;
-            s->dvd5_intc_src = src;
-        } else if (src->vect == 0x260) {
-            src->prio = 3;
-            s->dvd5_intc_src2 = src;
-        }
+    /* The loader and NK program different DVD CPLD priorities. */
+    s->dvd5_intc_src = cup28_intc_source(cpu, CUP28_INTEVT_DVD_NK);
+    s->dvd5_intc_src2 = cup28_intc_source(cpu, CUP28_INTEVT_DVD_MLD);
+    if (!s->dvd5_intc_src || !s->dvd5_intc_src2) {
+        error_report("cup28: no INTC source for the DVD CPLD interrupts");
+        exit(1);
     }
+    s->dvd5_intc_src->prio = 3;
+    s->dvd5_intc_src->parent = intc;
+    s->dvd5_intc_src2->prio = 3;
+    s->dvd5_intc_src2->parent = intc;
     s->p28_dvd_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, cup28_dvd_tick, s);
     memory_region_init_io(&s->p28_dvd_ports, OBJECT(s), &cup28_dvd_port_ops, s,
                           "cup28-dvd-ports", 0x10);

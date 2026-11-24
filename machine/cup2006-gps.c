@@ -25,20 +25,28 @@ static void cup2006_gps_update_irq(Cup2006MachineState *s)
     }
     sh_intc_toggle_source(src, 0, want ? 1 : -1);
 }
+/* The GPS device exists when a car-sensor track or a radio recording is
+ * given; either one drives the tracking chip. */
+bool cup2006_gps_enabled(const Cup2006MachineState *s)
+{
+    return (s->gpstrack && *s->gpstrack) ||
+           (s->gnssreplay && *s->gnssreplay);
+}
+
 /*
- * The scenario clock for the car-sensor track (wheel pulses and gyro): it
- * starts when the track is loaded, or with the radio replay below, as
- * before.  melco_track_start() is a first-call-wins clock start, so a load
- * at virtual time 0 defers to the first use exactly like the old
- * gps_track_start_ms == 0 check did.
+ * The scenario clock for the car-sensor track (wheel pulses and gyro).  It
+ * starts when the track is loaded, or at the first radio-replay tick when
+ * only gnssreplay= is given.  The start time is virtual time 0 at machine
+ * init, so a flag, not the time, records whether it is running.
  */
 void cup2006_track_clock_start(Cup2006MachineState *s, int64_t now_ms)
 {
-    if (!s->gps_track_start_ms) {
-        s->gps_track_start_ms = now_ms;
-        if (now_ms && s->track) {
-            melco_track_start(s->track, now_ms);
-        }
+    if (s->track_clock_started) {
+        return;
+    }
+    s->track_clock_started = true;
+    if (s->track) {
+        melco_track_start(s->track, now_ms);
     }
 }
 
@@ -240,7 +248,7 @@ static uint64_t cup2006_gps_read(Cup2006MachineState *s, hwaddr base,
 
     switch (addr) {
     case CUP2006_GPS_STATUS:
-        if (!s->gpstrack || !s->gpstrack[0]) {
+        if (!cup2006_gps_enabled(s)) {
             /* STUB: the latch reports its command as accepted. */
             value = CUP2006_GPS_STATUS_READY;
         } else {

@@ -59,7 +59,7 @@ here is visible to the guest.
  #include "system/xen.h"
  #include "system/qtest.h"
  #include "hw/pci/pci_bridge.h"
-@@ -1054,6 +1058,89 @@
+@@ -1054,6 +1058,95 @@
      return r;
  }
  
@@ -73,6 +73,8 @@ here is visible to the guest.
 + * is accepted then, see ui/input.c) happen at the same guest state.
 + */
 +static QEMUTimer *machine_x_stop_timer;
++/* The vm-change-state handler is added once, on first use. */
++static bool machine_x_stop_registered;
 +
 +static void machine_x_stop_cb(void *opaque)
 +{
@@ -93,6 +95,9 @@ here is visible to the guest.
 +        cpu->stop = true;
 +        cpu_exit(cpu);
 +    }
++    /* Only this pause accepts input; a user's STOP does not (see
++     * ui/input.c: the flag is cleared as soon as the VM runs again). */
++    qemu_input_accept_while_paused = true;
 +    vm_stop(RUN_STATE_PAUSED);
 +}
 +
@@ -101,6 +106,7 @@ here is visible to the guest.
 +{
 +    if (running) {
 +        icount_warp_inhibit = false;
++        qemu_input_accept_while_paused = false;
 +    }
 +}
 +
@@ -135,10 +141,10 @@ here is visible to the guest.
 +        machine_x_stop_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
 +                                            machine_x_stop_cb, NULL);
 +    }
-+    if (!qemu_input_accept_while_paused) {
++    if (!machine_x_stop_registered) {
 +        qemu_add_vm_change_state_handler(machine_x_stop_vmstate, NULL);
++        machine_x_stop_registered = true;
 +    }
-+    qemu_input_accept_while_paused = true;
 +    if (ns < 0) {
 +        timer_del(machine_x_stop_timer);
 +    } else {
@@ -203,15 +209,16 @@ here is visible to the guest.
      abort();
 --- a/ui/input.c
 +++ b/ui/input.c
-@@ -8,6 +8,21 @@
+@@ -8,6 +8,22 @@
  #include "system/replay.h"
  #include "system/runstate.h"
  
 +/*
-+ * melco-nav-emu: set by the machine's x-stop-at-ns property.  A VM paused
-+ * at a virtual-clock deadline then accepts input, so a harness can deliver
-+ * a key at an exact virtual time; otherwise input to a stopped VM is
-+ * dropped as upstream does.
++ * melco-nav-emu: set while the machine's x-stop-at-ns pause is in effect
++ * and cleared when the VM runs again.  A VM paused at a virtual-clock
++ * deadline then accepts input, so a harness can deliver a key at an exact
++ * virtual time; a user's STOP does not set it, so input to a stopped VM is
++ * still dropped as upstream does.
 + */
 +bool qemu_input_accept_while_paused;
 +

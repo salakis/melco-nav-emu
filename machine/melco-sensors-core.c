@@ -96,7 +96,9 @@ MelcoTrack *melco_track_core_load(const char *path, char *err_msg,
         fclose(f);
         return NULL;
     }
-    data = malloc(size ? (size_t)size : 1);
+    /* The parser below is string based: keep a NUL after the last byte so a
+     * file without a trailing newline still ends at the buffer end. */
+    data = malloc((size_t)size + 1);
     if (!data || (size && fread(data, 1, (size_t)size, f) != (size_t)size)) {
         snprintf(err_msg, err_msg_size, "cannot load track: %s",
                  strerror(errno));
@@ -104,6 +106,7 @@ MelcoTrack *melco_track_core_load(const char *path, char *err_msg,
         fclose(f);
         return NULL;
     }
+    data[size] = '\0';
     fclose(f);
 
     t = calloc(1, sizeof(*t));

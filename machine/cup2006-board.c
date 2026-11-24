@@ -179,7 +179,7 @@ static void cup2006_i2c_start_completion(Cup2006MachineState *s)
      * control write with the start bit (+0x04 bit 0x08) is one byte transfer
      * that reports all of SENT/RECV_END/RECV_DONE/RX_READY/SEND_END at once
      * (the phases are not separately timed).
- */
+     */
     s->i2c_busy = true;
     s->i2c_pending |= CUP2006_I2C_ST_SENT | CUP2006_I2C_ST_RECV_END |
                       CUP2006_I2C_ST_RECV_DONE |
@@ -201,7 +201,6 @@ static uint64_t cup2006_i2c_read(void *opaque, hwaddr base, hwaddr addr,
                                  unsigned size)
 {
     Cup2006MachineState *s = opaque;
-    hwaddr phys = base + addr;
     uint64_t value;
 
     switch (addr) {
@@ -226,10 +225,6 @@ static uint64_t cup2006_i2c_read(void *opaque, hwaddr base, hwaddr addr,
         value = 0;
         break;
     }
-    qemu_log_mask(LOG_GUEST_ERROR,
-                  "cup2006: i2c read pc=0x%08" PRIx32
-                  " addr=0x%08" HWADDR_PRIx " size=%u value=0x%" PRIx64 "\n",
-                  cup2006_guest_pc(), phys, size, value);
     return value;
 }
 
@@ -237,7 +232,7 @@ static void cup2006_i2c_write(void *opaque, hwaddr base, hwaddr addr,
                               uint64_t value, unsigned size)
 {
     Cup2006MachineState *s = opaque;
-    hwaddr phys = base + addr;
+
 
     switch (addr) {
     case CUP2006_I2C_CTRL:
@@ -265,10 +260,6 @@ static void cup2006_i2c_write(void *opaque, hwaddr base, hwaddr addr,
     default:
         break;
     }
-    qemu_log_mask(LOG_GUEST_ERROR,
-                  "cup2006: i2c write pc=0x%08" PRIx32
-                  " addr=0x%08" HWADDR_PRIx " size=%u value=0x%" PRIx64 "\n",
-                  cup2006_guest_pc(), phys, size, value);
 }
 
 static uint64_t cup2006_i2c_phys_read(void *opaque, hwaddr addr,

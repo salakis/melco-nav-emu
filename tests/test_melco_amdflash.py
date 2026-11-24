@@ -46,15 +46,27 @@ int main(void)
     assert(!wr(0x1000, 0x30303030, 4));
     assert(arr[0x1000] == 0xff && op == MELCO_AMDFLASH_OP_NONE);
 
-    /* unlock + program writes the data into the array (A0 itself changes
-     * nothing, so it returns false but arms the address) */
+    /* a lone A0 outside unlock bypass programs nothing either */
+    assert(!wr(0x2aa8, 0xa0a0a0a0, 4));
+    assert(!c.program_pending);
+    assert(!wr(0x1000, 0x3c3c3c3c, 4));     /* not data either */
+    assert(arr[0x1000] == 0xff);
+
+    /* the datasheet sequence: A0 goes to the unlock address, the data to the
+     * target address (a program can only clear bits: 0xf0 & 0x3c = 0x30) */
     unlock55();
-    assert(!wr(0x1000, 0xa0a0a0a0, 4));     /* A0 arms the address */
-    assert(c.program_pending && c.program_addr == 0x1000);
+    assert(!wr(0x2aa8, 0xa0a0a0a0, 4));    /* A0 arms the cycle */
+    assert(c.program_pending);
     arr[0x1000] = 0xf0;
-    assert(wr(0x1000, 0x3c3c3c3c, 4));      /* data write */
+    assert(wr(0x1000, 0x3c3c3c3c, 4));     /* data write */
     assert(op == MELCO_AMDFLASH_OP_PROGRAM && off == 0x1000 && len == 4);
-    assert(arr[0x1000] == 0x3c);
+    assert(arr[0x1000] == 0x30);
+
+    /* the same when both land on one address */
+    unlock55();
+    assert(!wr(0x1000, 0xa0a0a0a0, 4));
+    assert(wr(0x1000, 0x0f0f0f0f, 4));
+    assert(arr[0x1000] == 0x00);           /* 0x30 & 0x0f */
 
     /* sector erase after the full 80 AA 55 sequence fills 0xff */
     arr[0x2000] = 0x00;
@@ -68,6 +80,15 @@ int main(void)
     assert(arr[0x2000] == 0xff && arr[0x2000 + SECTOR - 1] == 0xff);
     assert(arr[0x1fff] == 0xff);            /* untouched neighbour */
 
+    /* the erase leaves read mode: the next unlock sequence is not eaten */
+    arr[0x3000] = 0x00;
+    unlock55();
+    wr(0x2aa8, 0x80808080, 4);
+    wr(0x2aa8, 0xaaaaaaaa, 4);
+    wr(0x1554, 0x55555555, 4);
+    assert(wr(0x3000, 0x30303030, 4));
+    assert(op == MELCO_AMDFLASH_OP_SECTOR_ERASE && off == 0x3000);
+
     /* chip erase: 80 AA 55 10 (F0 first, as the guests do) */
     arr[0x100] = 0x00;
     wr(0x0, 0xf0f0f0f0, 4);
@@ -79,17 +100,35 @@ int main(void)
     assert(op == MELCO_AMDFLASH_OP_CHIP_ERASE && off == 0 && len == SZ);
     assert(arr[0x100] == 0xff);
 
-    /* autoselect: 90 serves the IDs at the bank base (0x2aa8 -> bank 0x2000) */
+    /* autoselect: 90 serves the IDs at the bank base (0x2aa8 -> 0x2000)
+     * without writing them into the array */
     wr(0x0, 0xf0f0f0f0, 4);
     unlock55();
     wr(0x2aa8, 0x90909090, 4);              /* 90: autoselect */
     assert(c.autoselect && c.autoselect_bank == 0x2000);
     assert(melco_amdflash_core_read(&c, 0x2000, 2) == 0x0001);   /* manufacturer */
     assert(melco_amdflash_core_read(&c, 0x2002, 2) == 0x227e);   /* device */
+    assert(arr[0x2000] == 0xff && arr[0x2002] == 0xff);
     /* F0 leaves autoselect; reads serve the array again */
     wr(0x0, 0xf0f0f0f0, 4);
     assert(!c.autoselect);
     assert(melco_amdflash_core_read(&c, 0x2000, 2) == 0xffff);
+
+    /* unlock bypass: AA 55 20, then A0 programs with no unlock at all */
+    unlock55();
+    wr(0x2aa8, 0x20202020, 4);
+    assert(c.bypass);
+    arr[0x4000] = 0xff;
+    assert(!wr(0x4000, 0xa0a0a0a0, 4));     /* lone A0 in bypass arms */
+    assert(c.program_pending);
+    assert(wr(0x4000, 0x00000000, 4));      /* data clears all bits */
+    assert(arr[0x4000] == 0x00);
+    /* 90 00 leaves bypass and does not turn autoselect on */
+    wr(0x0, 0x90909090, 4);
+    wr(0x0, 0x00000000, 4);
+    assert(!c.bypass && !c.autoselect);
+    assert(!wr(0x4000, 0xa0a0a0a0, 4));     /* back to needing the unlock */
+    assert(!c.program_pending);
 
     /* interleave 2: commands with the byte in two lanes (0x00aa00aa) */
     melco_amdflash_core_init(&c, arr, SZ, SECTOR, 2, 0x0001, 0x227e);
@@ -99,7 +138,7 @@ int main(void)
     wr(0x1554, 0x00550055, 4);
     assert(c.state == MELCO_AMDFLASH_ST_U2);
     assert(!wr(0x1000, 0x00a000a0, 4));     /* A0 */
-    assert(c.program_pending && c.program_addr == 0x1000);
+    assert(c.program_pending);
     assert(wr(0x1000, 0x0000000f, 4));      /* data write, one lane */
     assert(arr[0x1000] == 0x0f);
     /* a single-lane 0xaa is not a command at interleave 2 */

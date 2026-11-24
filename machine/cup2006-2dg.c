@@ -6,6 +6,11 @@
 
 #include "cup2006-internal.h"
 
+/* Frame-plane pixel ops per job, and vertices per list packet: a guest list
+ * must never hold one MMIO write for minutes. */
+#define CUP2006_DG_FRAME_BUDGET 4000000ull
+#define CUP2006_DG_MAX_VERTICES 4096u
+
 
 static uint64_t cup2006_dg_read_at(Cup2006MachineState *s, hwaddr base,
                                    hwaddr addr, unsigned size)
@@ -692,6 +697,9 @@ static void cup2006_dg_plot(Cup2006MachineState *s, int x, int y, int w,
             if (xx < xmin || xx > xmax || yy < ymin || yy > ymax) {
                 continue;
             }
+            if (++s->dg_frame_ops > CUP2006_DG_FRAME_BUDGET) {
+                return;
+            }
             dp = cup2006_dg_ram_ptr(s, s->dg_reg[CUP2006_DG_DEST >> 2] +
                                     ((uint32_t)yy * dstrr + (uint32_t)xx) * 2,
                                     2);
@@ -733,9 +741,14 @@ static uint64_t cup2006_dg_linec(Cup2006MachineState *s, uint32_t pc,
     }
     xmax = MIN(xmax, CUP2006_DG_SURF_W - 1);
     ymax = MIN(ymax, CUP2006_DG_SURF_H - 1);
+    n = MIN(n, CUP2006_DG_MAX_VERTICES);
     for (i = 0; i < n; i++) {
         uint32_t v;
         int x, y;
+
+        if (s->dg_frame_ops > CUP2006_DG_FRAME_BUDGET) {
+            break;
+        }
 
         if (!cup2006_dg_fetch(s, vaddr + 4 * i, &v)) {
             cup2006_dg_skip(s, pc, "LINEC vertex outside RAM", w0);
@@ -768,7 +781,8 @@ static uint64_t cup2006_dg_linec(Cup2006MachineState *s, uint32_t pc,
                                 &written);
                 int e2 = 2 * err;
 
-                if (cx == ex && cy == ey) {
+                if ((cx == ex && cy == ey) ||
+                    s->dg_frame_ops > CUP2006_DG_FRAME_BUDGET) {
                     break;
                 }
                 if (e2 >= dy) {
@@ -965,6 +979,7 @@ static void cup2006_dg_ftrapc(Cup2006MachineState *s, uint32_t pc,
     if (s->dg_work_ops > CUP2006_DG_WORK_BUDGET) {
         return;
     }
+    n = MIN(n, CUP2006_DG_MAX_VERTICES);
     for (i = 0; i < n; i++) {
         uint32_t v;
         int x1, y1;
@@ -979,12 +994,16 @@ static void cup2006_dg_ftrapc(Cup2006MachineState *s, uint32_t pc,
         if (i > 0 && y0 != y1) {
             int ya = MIN(y0, y1), yb = MAX(y0, y1), y;
 
-            for (y = MAX(ya, cy0); y < yb && y <= cy1; y++) {
+            for (y = MAX(ya, cy0);
+                 y < yb && y <= cy1 &&
+                 s->dg_work_ops <= CUP2006_DG_WORK_BUDGET; y++) {
                 int xe = x0 + (int)(((int64_t)(y - y0) * (x1 - x0)) /
                                     (y1 - y0));
                 int x;
 
-                for (x = MAX(xl, cx0); x <= MIN(xe, cx1); x++) {
+                for (x = MAX(xl, cx0);
+                     x <= MIN(xe, cx1) &&
+                     s->dg_work_ops <= CUP2006_DG_WORK_BUDGET; x++) {
                     cup2006_dg_work_op(s, x, y, 2);
                 }
             }
@@ -1028,7 +1047,8 @@ static void cup2006_dg_linewc(Cup2006MachineState *s, uint32_t pc,
     unsigned i;
 
     cup2006_dg_work_clip(s, mode, &cx0, &cy0, &cx1, &cy1);
-    for (i = 0; i < n; i++) {
+    n = MIN(n, CUP2006_DG_MAX_VERTICES);
+    for (i = 0; i < n && s->dg_work_ops <= CUP2006_DG_WORK_BUDGET; i++) {
         uint32_t v;
         int x1, y1;
 
@@ -1165,6 +1185,7 @@ static void cup2006_dg_execute(Cup2006MachineState *s)
     unsigned steps = 0;
 
     s->dg_work_ops = 0;
+    s->dg_frame_ops = 0;
     while (steps++ < CUP2006_DG_WALK_MAX) {
         uint32_t w0, f[8];
         uint32_t op;
@@ -1356,7 +1377,7 @@ static void cup2006_dg_execute(Cup2006MachineState *s)
              * SH7764 23.2.3(2): [0xB1|mode][Color1|Color0][Base][TDX|TDY]
              * [TXOFS|n][0|W] + vertices or LINK. STUB: drawn as a solid
              * Color1 line via LINEC; the pattern is not sampled.
- */
+            */
             uint32_t fw[5], link;
             uint32_t mode = w0 & 0xffff;
             unsigned i;
@@ -1393,7 +1414,7 @@ static void cup2006_dg_execute(Cup2006MachineState *s)
             /*
              * SH7764 23.2.3(4): work-reference edge antialiasing. STUB: not
              * drawn; the command is consumed ([0|n] + n vertices or LINK).
- */
+            */
             uint32_t nw;
 
             if (!cup2006_dg_fetch(s, pc + 4, &nw)) {
@@ -1423,7 +1444,7 @@ static void cup2006_dg_start(Cup2006MachineState *s)
      * The completion interrupt is only delivered when the guest has enabled
      * the 0x8C0 source in INTC2 (0xFFE00044 bit 20); the job itself always
      * completes.
- */
+     */
     uint32_t intc2_en = s->intc2_enabled & CUP2006_DG_INTC2_ENABLE;
 
     s->dg_jobs++;
@@ -1478,7 +1499,7 @@ static void cup2006_dg_write_at(Cup2006MachineState *s, hwaddr base,
     case CUP2006_DG_STATUS:
         /*
          * Write-1-to-clear: writing the register never sets a flag.
- */
+        */
         s->dg_reg[CUP2006_DG_STATUS >> 2] &= ~val;
         break;
     case CUP2006_DG_IRQCLR:

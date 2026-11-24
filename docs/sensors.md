@@ -25,18 +25,14 @@ t_s,lat_deg,lon_deg,alt_m,speed_kmh,heading_deg,yaw_dps,gps
 ## End-of-track rule
 
 The replay is finite: past the last row the car is at the last position with
-speed 0, yaw 0 and no fix (`gps` ignored), and the odometer stops. On CUP28
-this was always the behaviour; on CU-P2006 the track used to loop forever
-when no `gnssreplay=` recording was given — since the shared module it ends
-like CUP28's (with a `gnssreplay=` recording the old behaviour already ended
-the same way).
+speed 0, yaw 0 and no fix (`gps` ignored), and the odometer stops.
 
 ## Clock start per board
 
 - **CUP28**: the clock starts at the first use of the track (the first
-  sensor/MOST sample), as before.
-- **CU-P2006**: the clock starts when the track is loaded (or with the first
-  radio-replay tick when only `gnssreplay=` is set), as before.
+  sensor/MOST sample).
+- **CU-P2006**: the clock starts when the track is loaded, or at the first
+  radio-replay tick when only `gnssreplay=` is set.
 
 ## Which board signals each column drives
 

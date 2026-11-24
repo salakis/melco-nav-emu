@@ -14,7 +14,7 @@
 #include "qemu/error-report.h"
 #include "qemu/host-utils.h"
 #include "qemu/timer.h"
-#include "qemu/notify.h"
+#include "system/runstate.h"
 #include "system/system.h"
 #include "system/block-backend.h"
 #include "trace.h"
@@ -41,7 +41,7 @@ struct MelcoAmdFlash {
     int64_t activity_ms;        /* guest time of the last array change */
     hwaddr dirty_lo, dirty_hi;  /* dirty span [lo, hi), lo >= hi = clean */
     QEMUTimer *save_timer;
-    Notifier exit_notifier;
+    VMChangeStateEntry *vmstate;
     Error *migration_blocker;
 };
 
@@ -81,9 +81,31 @@ static void melco_amdflash_save_timer_cb(void *opaque)
               MELCO_AMDFLASH_SAVE_MS);
 }
 
-static void melco_amdflash_exit(Notifier *n, void *data)
+/*
+ * The block layer is closed by qemu_cleanup() before the exit notifiers run,
+ * so a save there writes to a closed backend and is lost.  The VM stops
+ * first: flush on the shutdown transition instead.
+ */
+static void melco_amdflash_vm_change(void *opaque, bool running,
+                                     RunState state)
 {
-    melco_amdflash_save(container_of(n, MelcoAmdFlash, exit_notifier));
+    MelcoAmdFlash *s = opaque;
+
+    if (!running && state == RUN_STATE_SHUTDOWN) {
+        melco_amdflash_save(s);
+    }
+}
+
+/* Autoselect serves the ID block from the read callback, so the window has to
+ * leave romd mode while it is on or reads would come straight from the RAM. */
+static void melco_amdflash_sync_romd(MelcoAmdFlash *s, bool was_autoselect)
+{
+    if (s->core.autoselect == was_autoselect) {
+        return;
+    }
+    memory_region_flush_rom_device(&s->mem, s->core.autoselect_bank,
+                                   sizeof(uint64_t));
+    memory_region_rom_device_set_romd(&s->mem, !s->core.autoselect);
 }
 
 static void melco_amdflash_write_dev(MelcoAmdFlash *s, hwaddr addr,
@@ -121,11 +143,7 @@ static void melco_amdflash_write_dev(MelcoAmdFlash *s, hwaddr addr,
             break;
         }
     }
-    /* Autoselect swaps the ID bytes into the array: drop translated code. */
-    if (s->core.autoselect != was_autoselect) {
-        memory_region_flush_rom_device(&s->mem, s->core.autoselect_bank,
-                                       sizeof(s->core.id_save));
-    }
+    melco_amdflash_sync_romd(s, was_autoselect);
 }
 
 static uint64_t melco_amdflash_read_op(void *opaque, hwaddr addr,
@@ -205,8 +223,7 @@ static void melco_amdflash_realize(DeviceState *dev, Error **errp)
                                  melco_amdflash_save_timer_cb, s);
     timer_mod(s->save_timer, qemu_clock_get_ms(QEMU_CLOCK_REALTIME) +
               MELCO_AMDFLASH_SAVE_MS);
-    s->exit_notifier.notify = melco_amdflash_exit;
-    qemu_add_exit_notifier(&s->exit_notifier);
+    s->vmstate = qemu_add_vm_change_state_handler(melco_amdflash_vm_change, s);
 
     sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->mem);
 
@@ -220,8 +237,10 @@ static void melco_amdflash_realize(DeviceState *dev, Error **errp)
 static void melco_amdflash_reset(DeviceState *dev)
 {
     MelcoAmdFlash *s = MELCO_AMDFLASH(dev);
+    bool was_autoselect = s->core.autoselect;
 
     melco_amdflash_core_reset(&s->core);
+    melco_amdflash_sync_romd(s, was_autoselect);
 }
 
 static const Property melco_amdflash_properties[] = {
@@ -239,7 +258,7 @@ static void melco_amdflash_unrealize(DeviceState *dev)
     MelcoAmdFlash *s = MELCO_AMDFLASH(dev);
 
     timer_del(s->save_timer);
-    qemu_remove_exit_notifier(&s->exit_notifier);
+    qemu_del_vm_change_state_handler(s->vmstate);
 }
 
 static void melco_amdflash_class_init(ObjectClass *klass, const void *data)

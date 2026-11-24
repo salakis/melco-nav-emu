@@ -203,4 +203,19 @@ for pair in "1:$DVD1" "2:$DVD2"; do
   done
 done
 
+# The roots belong to one disc set: boards/cup2006.py reads this back so a
+# boot with another set in the drive stops instead of mixing a set's firmware
+# and map identity into another set's install.
+set_id() {
+  local stem
+  stem="$(basename "$1")"
+  stem="${stem%.*}"
+  printf '%s' "${stem%_[12]}"
+}
+if [ "$(set_id "$DVD1")" = "$(set_id "$DVD2")" ]; then
+  printf '%s\n' "$(set_id "$DVD1")" > "$OUT/.disc-set"
+else
+  printf '%s+%s\n' "$(set_id "$DVD1")" "$(set_id "$DVD2")" > "$OUT/.disc-set"
+fi
+
 echo "done: $OUT/dvd1 and $OUT/dvd2"

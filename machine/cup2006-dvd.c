@@ -18,7 +18,7 @@ static void cup2006_dvd5_irq_next(Cup2006MachineState *s)
         /*
          * The OAL OEMInterruptEnable for SYSINTR 0x1C sets this bit; without
          * it the line cannot reach the CPU (the 2DG rule).
- */
+        */
         s->dvd5_irq_blocked++;
         if (s->dvd5_irq_blocked <= 4) {
             trace_cup2006_dvd_dvd5_intevt_not_raised(CUP2006_DVD5_INTEVT, s->intc2_enabled);
@@ -30,7 +30,7 @@ static void cup2006_dvd5_irq_next(Cup2006MachineState *s)
          * STUB: the SH7770 INTC2 priority/enable for this line is
          * unmodelled, so the machine owns them; re-assert them at the
          * raise edge and kick the vCPU.
- */
+        */
         src->prio = CUP2006_DVD5_INTC_PRIO;
         src->enable_count = src->enable_max;
         sh_intc_toggle_source(src, 0, 1);
@@ -347,7 +347,7 @@ static void cup2006_dvd5_reply(Cup2006MachineState *s, const uint8_t *req,
      * a fixed VA from one firmware build), so translate it with the current
      * process's MMU and write there; see README limitations. */
     if (current_cpu) {
-        pa = cpu_get_phys_page_debug(current_cpu, CUP2006_DVD5_REPLY_VA);
+        pa = cup2006_phys_page_debug(current_cpu, CUP2006_DVD5_REPLY_VA);
     } else {
         pa = (hwaddr)-1;
     }
@@ -475,10 +475,10 @@ static void cup2006_dvd5_req_write(void *opaque, hwaddr addr, uint64_t value,
     Cup2006MachineState *s = opaque;
 
     cup2006_reg32_write(s->dvd5_req, addr, value, size);
-    /* The sender memcpy's the frame into this window, then stores its length
-     * at +0x40 (dvd.dll 0x039a99b6-ba) and rings the doorbell (INTC2
-     * 0xFFE00044 bit 28, cup2006_dvd5_host_doorbell) as the last step.  The
-     * length store marks a frame as staged; the doorbell answers it once. */
+    /* The guest copies the frame into this window, then stores its length at
+     * +0x40 and rings the doorbell (INTC2 0xFFE00044 bit 28,
+     * cup2006_dvd5_host_doorbell) as the last step.  The length store marks a
+     * frame as staged; the doorbell answers it once. */
     if (addr == 0x40) {
         s->dvd5_req_staged = value >= 1 && value <= 24 &&
                              s->dvd5_req[0] >= 0xb8 && s->dvd5_req[0] <= 0xbf;
@@ -486,16 +486,12 @@ static void cup2006_dvd5_req_write(void *opaque, hwaddr addr, uint64_t value,
 }
 
 /*
- * The host rang the drive: dvd.dll's sender 0x039a9954 ends with
- * `mov.l r2,@r3` at 0x039a99cc, storing 0x10000000 (pool 0x039a9a18) through
- * the global 0x01f89814 (pool 0x039a9a14).  Its init 0x039a8700-0x039a874e
- * fills that global with the address its I/O-map helper returned for PA
- * 0xFFE0001C (`mov.l =0xffe0001c,r4` 0x039a870c, `jsr @r9` 0x039a871c), plus
- * 40: the doorbell is INTC2 0xFFE00044 bit 28 (measured: r3=0x006f0044 at
- * 0x039a99cc, gva2gpa 0x1FE00044, its area-7 alias).  The same bit also
- * enables and completes SYSINTR 0x1C, so only a write with a staged request
- * frame rings the drive.  STUB: the drive reads the frame and answers
- * at once.
+ * The host rang the drive: the guest's sender stages a request frame in the
+ * request window (length at +0x40) and then writes the doorbell bit in
+ * INTC2 (0xFFE00044 bit 28, see CUP2006_DVD5_INTC2_BIT).  The same bit
+ * enables and completes SYSINTR 0x1C, so only a write that follows a staged
+ * request frame rings the drive.  STUB: the drive reads the frame and
+ * answers at once.
  */
 void cup2006_dvd5_host_doorbell(Cup2006MachineState *s)
 {
@@ -509,8 +505,8 @@ static void cup2006_dvd5_rpl_write(void *opaque, hwaddr addr, uint64_t value,
 {
     Cup2006MachineState *s = opaque;
 
-    /* No doorbell here: the guest's doorbell is INTC2 0xFFE00044 bit 28
-     * (cup2006_dvd5_host_doorbell); no dvd.dll code writes this window. */
+    /* No doorbell in this window: the guest's doorbell is INTC2 0xFFE00044
+     * bit 28 (cup2006_dvd5_host_doorbell). */
     cup2006_reg32_write(s->dvd5_rpl, addr, value, size);
 }
 

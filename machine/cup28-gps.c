@@ -145,15 +145,10 @@ static const MemoryRegionOps cup28_gps_ops = {
 void cup28_gps_init(Cup28MachineState *s, MemoryRegion *mem,
                            SuperHCPU *cpu)
 {
-    struct intc_desc *desc = cpu->env.intc_handle;
-
-    for (unsigned i = 0; desc && i < desc->nr_sources; i++) {
-        struct intc_source *src = &desc->sources[i];
-
-        if (src->vect == 0x200 && !s->p28_gps_tx_src) {
-            s->p28_gps_tx_src = src;
-            break;
-        }
+    s->p28_gps_tx_src = cup28_intc_source(cpu, CUP28_INTEVT_GPS_TX);
+    if (!s->p28_gps_tx_src) {
+        error_report("cup28: no INTC source for the GPS UART interrupt");
+        exit(1);
     }
     memory_region_init_io(&s->p28_gps_io, NULL, &cup28_gps_ops, s,
                           "cup28-gps-uart", 0x20);
@@ -257,13 +252,10 @@ static const MemoryRegionOps cup28_pulse_ops = {
 void cup28_sns_init(Cup28MachineState *s, MemoryRegion *mem,
                            SuperHCPU *cpu)
 {
-    struct intc_desc *desc = cpu->env.intc_handle;
-
-    for (unsigned i = 0; desc && i < desc->nr_sources; i++) {
-        if (desc->sources[i].vect == 0x340) {
-            s->p28_sns_src = &desc->sources[i];
-            break;
-        }
+    s->p28_sns_src = cup28_intc_source(cpu, CUP28_INTEVT_SNS);
+    if (!s->p28_sns_src) {
+        error_report("cup28: no INTC source for the sensor interrupt");
+        exit(1);
     }
     /* STUB: CPLD +0x108 is a per-source enable mask (ISRs 0x800858ec,
      * 0x8008591c, 0x80085998, 0x80085b9c each clear their bit on entry).

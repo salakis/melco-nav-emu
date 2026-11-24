@@ -7,7 +7,7 @@
  * starts at the P2 alias of that entry (0xa0100004).
  *
  * On top of RAM, the SH7750 on-chip peripherals and a serial console, the
- * board devices live in the .c.inc files #included below (DU display,
+ * board devices live in the cup2006-*.c files of the same directory (DU display,
  * 2DG/MBX graphics, Sub-CPU link, ATA HDD, DVD drive, GPS, ...).  A
  * permissive catch-all covers board registers not modelled yet: it logs
  * (pc, addr, size, value) with LOG_GUEST_ERROR and returns zero.
@@ -20,7 +20,7 @@
 
 
 /* QEMU 11 replaced cpu_get_phys_page_debug: same result, -1 if unmapped. */
-hwaddr cpu_get_phys_page_debug(CPUState *cpu, vaddr addr)
+hwaddr cup2006_phys_page_debug(CPUState *cpu, vaddr addr)
 {
     TranslateForDebugResult r;
 
@@ -46,6 +46,11 @@ hwaddr cpu_get_phys_page_debug(CPUState *cpu, vaddr addr)
 #define CUP2006_DRF_BASE        0x00000000  /* physical, full window */
 #define CUP2006_DRF_SIZE        0x02000000  /* 32 MiB guest window */
 #define CUP2006_DRF_SECTOR      0x00040000
+/* Autoselect IDs the DRF part answers with.  STUB: the mark of the board's
+ * own part is not known (no guest in the boot traces issues AA 55 90 here),
+ * so the values are CUP28's until a dump of the part replaces them. */
+#define CUP2006_DRF_ID_MANUFACTURER 0x0001
+#define CUP2006_DRF_ID_DEVICE       0x227e
 
 /* Board register block at 0xff800200 (area-7 alias 0x1f800200), mapped at
  * higher priority than the sh7750 0xff800000 alias so the catch-all sees it;
@@ -54,7 +59,7 @@ hwaddr cpu_get_phys_page_debug(CPUState *cpu, vaddr addr)
 #define CUP2006_BOARD_A7_BASE   0x1f800200
 #define CUP2006_BOARD_REG_SIZE  0x00000e00
 
-/* Board A/D converter at 0xFF93C000 (alias 0x1F93C000, cup2006-board.c.inc
+/* Board A/D converter at 0xFF93C000 (alias 0x1F93C000, cup2006-board.c
  * "ADC"): ADDRA..ADDRD at +0x0..+0x6, ADCSR at +0x10; mapped by selftest=. */
 #define CUP2006_SELFTEST_A7_BASE 0x1f93c000  /* area-7 alias: gps.dll's mapping */
 #define CUP2006_SELFTEST_SIZE   0x00001000
@@ -156,7 +161,7 @@ hwaddr cpu_get_phys_page_debug(CPUState *cpu, vaddr addr)
  * file (an erased 0xFFFF image when none is given). */
 
 /* SCIF0 page 0xFF923000 (alias 0x1F923000): the SUB1: link to the Sub-CPU
- * (cup2006-subcpu.c.inc). */
+ * (cup2006-subcpu.c). */
 
 /* CARSIG/sensor block 0xFFA00000-0xFFA01FFF (alias 0x1FA00000): period
  * +0x0000, ctrl +0x1000 (bit 15 enables sampling), status +0x1004 (ready
@@ -223,7 +228,7 @@ hwaddr cpu_get_phys_page_debug(CPUState *cpu, vaddr addr)
 #define CUP2006_DVD5_DMA_INTC_VECT 0x0a20
 /* OAL priority for INTEVT 0xF60 (kernel IMASK-byte rule): 2. */
 
-/* Sound (machine/cup2006-audio.c.inc): SSI at 0xFF911000 with its DMA
+/* Sound (machine/cup2006-audio.c): SSI at 0xFF911000 with its DMA
  * channel at 0xFF801040; common DMA regs at 0xFF801800: status +0x10C,
  * ack +0x110, enable +0x114. */
 /* OAL handler table index 78, returns SYSINTR 0x18. */
@@ -547,11 +552,10 @@ static void cup2006_mbx_draw_marker(Cup2006MachineState *s)
     }
     s->mbx_marker_frames++;
     if (s->mbx_marker_frames == 2 || s->mbx_marker_frames == 200) {
-        trace_cup2006_board_mbx_render_table();
+        trace_cup2006_board_mbx_marker_table();
         for (unsigned r = 0x608; r <= 0x6e8; r += 4) {
-            trace_cup2006_board_event_3(r, s->mbx_window[r >> 2]);
+            trace_cup2006_board_mbx_marker_register(r, s->mbx_window[r >> 2]);
         }
-        trace_cup2006_board_event_4();
     }
     if (s->mbx_marker_frames <= 2 || (s->mbx_marker_frames % 100) == 0) {
         /* Trace events take no floats: coordinates become milli-units. */
@@ -643,7 +647,7 @@ static void cup2006_init(MachineState *machine)
      * STUB: present the display surface as graphic console 0.
      * Coldplugged here, before machine-ready, so QEMU's console ordering puts
      * this graphic console ahead of the text consoles (index 0).
- */
+     */
     cup2006_display_create(s);
 
     /* SH7785-compatible DU register file at P4 0xFFF80000 with area-7 alias
@@ -885,9 +889,15 @@ static void cup2006_init(MachineState *machine)
                                                        blk_getlength(blk),
                                                        "loaded");
         }
-        /* 32-bit interleaved pair: the command byte sits in every lane. */
-        s->drf = melco_amdflash_create("cup2006-drf-flash", CUP2006_DRF_SIZE, CUP2006_DRF_SECTOR,
-                                       4, 0x0001, 0x227e, blk);
+        /* 32-bit interleaved pair: the command byte sits in every lane.
+         * The autoselect IDs are the ones CUP28's flash model answers with:
+         * STUB, the mark of the CU-P2006's own part is not known (no guest
+         * in the boot traces issues AA 55 90 on this board), so a dump of
+         * the board's part would replace them. */
+        s->drf = melco_amdflash_create("cup2006-drf-flash", CUP2006_DRF_SIZE,
+                                       CUP2006_DRF_SECTOR, 4,
+                                       CUP2006_DRF_ID_MANUFACTURER,
+                                       CUP2006_DRF_ID_DEVICE, blk);
         memory_region_add_subregion_overlap(sysmem, CUP2006_DRF_BASE,
                                             melco_amdflash_mmio(s->drf), 1);
         if (blk && blk_getlength(blk) < CUP2006_DRF_SIZE) {
@@ -907,7 +917,7 @@ static void cup2006_init(MachineState *machine)
      * Decode gaps: lowest priority, so real devices and RAM win. Any
      * unimplemented physical address still gets a readable zero and a
      * trace line instead of a QEMU abort.
- */
+     */
     memory_region_init_io(&s->unknown_mmio, NULL, &cup2006_unknown_ops, s,
                           "cup2006-unknown-mmio", 4 * GiB);
     memory_region_add_subregion_overlap(sysmem, 0, &s->unknown_mmio, -1);
@@ -915,7 +925,7 @@ static void cup2006_init(MachineState *machine)
     /*
      * Board/FPGA/pin-mux block in the BSC window. Higher priority than
      * the sh7750 0xff800000 alias, lower than no other device there.
- */
+     */
     memory_region_init_io(&s->board_regs, NULL, &cup2006_board_ops, s,
                           "cup2006-board-regs", CUP2006_BOARD_REG_SIZE);
     memory_region_add_subregion_overlap(sysmem, CUP2006_BOARD_REG_BASE,
@@ -925,7 +935,7 @@ static void cup2006_init(MachineState *machine)
      * Area-7 alias of the same board block. sh7750_init maps 0x1f800000
      * with an abort-on-unknown-register handler, so the alias needs its own
      * region at the same priority as the P4 mapping.
- */
+     */
     memory_region_init_io(&s->board_a7_regs, NULL, &cup2006_board_a7_ops, s,
                           "cup2006-board-a7-regs", CUP2006_BOARD_REG_SIZE);
     memory_region_add_subregion_overlap(sysmem, CUP2006_BOARD_A7_BASE,
@@ -974,7 +984,7 @@ static void cup2006_init(MachineState *machine)
     /*
      * CPG block: hide the sh7750 model's abort-on-unknown-register path.
      * Mapped on both the P4 (0xffc00000) and A7 (0x1fc00000) aliases.
- */
+     */
     memory_region_init_io(&s->cpg_regs, NULL, &cup2006_cpg_ops, s,
                           "cup2006-cpg-regs", CUP2006_CPG_SIZE);
     memory_region_add_subregion_overlap(sysmem, 0xffc00000, &s->cpg_regs, 1);
@@ -986,7 +996,7 @@ static void cup2006_init(MachineState *machine)
     /*
      * Board RTC/backup time. Off by default: a normal run keeps the
      * catch-all zero value, which is non-blocking but gives an empty date.
- */
+     */
     if (s->rtc) {
         s->rtc_base_s = CUP2006_RTC_EPOCH;
         s->rtc_base_ms = 0;
@@ -1013,7 +1023,7 @@ static void cup2006_init(MachineState *machine)
         /*
          * STUB: the card's CIS in slot A's attribute memory; the rest of the
          * window stays zero RAM (card attribute/common memory).
- */
+        */
         {
             static const hwaddr cisoff[CUP2006_PCC_CIS_BASES] =
                 CUP2006_PCC_CIS_OFFS;
@@ -1244,7 +1254,7 @@ static void cup2006_init(MachineState *machine)
      * Board power/ACC interrupt (INTEVT 0x240 -> SYSINTR 0x1d) on the SH7750
      * DMAC_DMTE0 source (slot 22, vect 0x640), which no device here uses.
      * acckey=on (default off) makes F12 pulse it.
- */
+     */
     s->power_timer = timer_new_ms(QEMU_CLOCK_VIRTUAL, cup2006_power_pulse, s);
     s->power_drop_timer = timer_new_ms(QEMU_CLOCK_VIRTUAL,
                                        cup2006_power_drop, s);
@@ -1279,26 +1289,28 @@ static void cup2006_init(MachineState *machine)
     s->carsig_period_us = CUP2006_CARSIG_DEFAULT_US;
     s->carsig_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
                                    cup2006_carsig_tick, s);
-    if (s->gpstrack && s->gpstrack[0]) {
+    if (cup2006_gps_enabled(s)) {
         struct intc_desc *desc = cpu->env.intc_handle;
         Error *err = NULL;
 
-        s->track = melco_track_load(s->gpstrack, &err);
-        if (!s->track) {
-            error_report("cup2006: %s", error_get_pretty(err));
-            exit(1);
+        if (s->gpstrack && s->gpstrack[0]) {
+            s->track = melco_track_load(s->gpstrack, &err);
+            if (!s->track) {
+                error_report("cup2006: %s", error_get_pretty(err));
+                exit(1);
+            }
+            /* One scenario clock for radio, wheel pulses and gyro: it starts
+             * with the track, so gpstrack= alone (no gnssreplay=) still
+             * drives the wheel and gyro.  Host-side sensor timing only. */
+            cup2006_track_clock_start(s,
+                                      qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+            /* Trace events take no floats: the rate becomes milli-Hz. */
+            trace_cup2006_gps_car_sensor_track_rows(
+                melco_track_rows(s->track), s->gpstrack,
+                (int32_t)lrint(1000000.0 / melco_track_interval_ms(s->track)),
+                (s->gnssreplay && *s->gnssreplay) ? "" :
+                "; no GNSS recording, the receiver has no signal");
         }
-        /* One scenario clock for radio, wheel pulses and gyro starts when
-         * the track is loaded, so gpstrack= alone (no gnssreplay=) still
-         * drives the wheel and gyro; this is host-side sensor timing, not
-         * guest state. */
-        cup2006_track_clock_start(s, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
-        /* Trace events take no floats: the rate becomes milli-Hz. */
-        trace_cup2006_gps_car_sensor_track_rows(
-            melco_track_rows(s->track), s->gpstrack,
-            (int32_t)lrint(1000000.0 / melco_track_interval_ms(s->track)),
-            (s->gnssreplay && *s->gnssreplay) ? "" :
-            "; no GNSS recording, the receiver has no signal");
         for (unsigned i = 0; desc && i < desc->nr_sources; i++) {
             struct intc_source *src = &desc->sources[i];
 
@@ -1396,7 +1408,7 @@ static void cup2006_init(MachineState *machine)
          * Load the raw flattened image directly into guest RAM rather than
          * through load_image_targphys: the latter registers a ROM blob
          * that is re-applied on every CPU reset.
- */
+        */
         if (!g_file_get_contents(machine->kernel_filename, &data, &size,
                                  &err)) {
             error_report("cup2006: could not load kernel '%s': %s",
@@ -1759,7 +1771,7 @@ static void cup2006_machine_class_init(ObjectClass *oc, const void *data)
      * 128 MiB is not enough: the NK startup installs a stack at physical
      * 0x0c200000 and clears a block ending at 0x08386ffc. 256 MiB is the
      * smallest power-of-two mapping that covers both.
- */
+     */
     mc->default_ram_size = 256 * MiB;
 
     object_class_property_add_bool(oc, "carmarker",
@@ -1773,7 +1785,7 @@ static void cup2006_machine_class_init(ObjectClass *oc, const void *data)
     /*
      * The board's self-test sample register at 0xff93c000 (hardware
      * version, GPS antenna sense).  The product profile enables it.
- */
+     */
     object_class_property_add_bool(oc, "selftest",
                                    cup2006_get_selftest,
                                    cup2006_set_selftest);
@@ -1783,7 +1795,7 @@ static void cup2006_machine_class_init(ObjectClass *oc, const void *data)
     /*
      * Supply the power-on INTC IPRA state the boot ROM leaves for the NK:
      * TMU0 priority 1, so its underflow wakes the kernel idle sleep.
- */
+     */
     object_class_property_add_bool(oc, "intcinit",
                                    cup2006_get_intcinit,
                                    cup2006_set_intcinit);
@@ -1885,8 +1897,9 @@ static void cup2006_machine_class_init(ObjectClass *oc, const void *data)
                                   cup2006_get_eeprom,
                                   cup2006_set_eeprom);
     object_class_property_set_description(oc, "eeprom",
-        "file holding the onboard 93C46 EEPROM (128 bytes, big-endian words); "
-        "created on the first guest write, all zero before (default: none)");
+        "file holding the onboard 93C46 EEPROM (64 16-bit words, 128 bytes, "
+        "big-endian); created on the first guest write, erased (all 0xffff) "
+        "before (default: none)");
 
     object_class_property_add_str(oc, "dvdnext",
                                   cup2006_get_dvdnext,

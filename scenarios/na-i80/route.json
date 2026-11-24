@@ -41,7 +41,7 @@
     "gps_tow_s": 292155,
     "generator": "GPS-SDR-SIM -e brdc0010.22n -x motion.csv -d 180.0 -s 2500000 -b 16 -T 2009/09/09,09:09:15 -i -p 32",
     "tracker": "PocketSDR pocket_trk -sig L1CA -prn 1-32 -fmt CS16 -f 2.5 -fo 0 -ti 0",
-    "export": "tools/gps/export_replay.py --gps-tow 292155",
+    "export": "src/melco_nav_emu/gnss/export_replay.py --gps-tow 292155",
     "nav_subframes": 315
   }
 }

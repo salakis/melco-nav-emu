@@ -114,6 +114,7 @@ void cup2006_eeprom_load(Cup2006MachineState *s)
 {
     uint8_t img[2 * CUP2006_EEPROM_WORDS];
     FILE *f;
+    size_t n;
     unsigned i;
 
     /* An erased Microwire 93C46 reads 0xFFFF on every word, so a fresh or
@@ -126,12 +127,12 @@ void cup2006_eeprom_load(Cup2006MachineState *s)
     if (!f) {
         return;                     /* a fresh unit: erased (0xFFFF) */
     }
-    if (fread(img, sizeof(img), 1, f) == 1) {
-        for (i = 0; i < CUP2006_EEPROM_WORDS; i++) {
-            s->eeprom[i] = img[2 * i] << 8 | img[2 * i + 1];
-        }
+    /* Read what the file holds, not the whole array in one go: a short file
+     * keeps its words and leaves the rest erased. */
+    n = fread(img, 1, sizeof(img), f);
+    for (i = 0; i < n / 2; i++) {
+        s->eeprom[i] = img[2 * i] << 8 | img[2 * i + 1];
     }
-    /* A short file leaves the rest of the array erased. */
     fclose(f);
 }
 
@@ -175,7 +176,6 @@ static void cup2006_scif_tx_byte(Cup2006MachineState *s, uint8_t byte)
         if (s->scif_rx_byte < 0) {
             cup2006_scif_rx_arm(s);
         }
-        qemu_log_mask(LOG_GUEST_ERROR, "cup2006: eeprom read @0x%02x\n", addr);
         break;
     case 1:                             /* WRITE */
         if (s->eeprom_ewen) {
@@ -183,8 +183,6 @@ static void cup2006_scif_tx_byte(Cup2006MachineState *s, uint8_t byte)
                               cup2006_scif_rev8(s->scif_tx[3]);
             cup2006_eeprom_save(s);
         }
-        qemu_log_mask(LOG_GUEST_ERROR, "cup2006: eeprom write @0x%02x=0x%04x%s\n",
-                      addr, s->eeprom[addr], s->eeprom_ewen ? "" : " (disabled)");
         break;
     case 3:                             /* ERASE */
         if (s->eeprom_ewen) {
@@ -256,10 +254,6 @@ static uint64_t cup2006_scif_read(Cup2006MachineState *s, hwaddr base,
         value |= (uint64_t)byte << (8 * i);
     }
     cup2006_scif_note(s, phys, false, size, value);
-    qemu_log_mask(LOG_GUEST_ERROR,
-                  "cup2006: scif read pc=0x%08" PRIx32
-                  " addr=0x%08" HWADDR_PRIx " size=%u value=0x%" PRIx64 "\n",
-                  cup2006_guest_pc(), phys, size, value);
     return value;
 }
 
@@ -274,6 +268,7 @@ static void cup2006_scif_write(Cup2006MachineState *s, hwaddr base,
             s->scif_file[addr + i] = (value >> (8 * i)) & 0xff;
         }
     }
+    cup2006_scif_note(s, phys, true, size, value);
     for (i = 0; i < size; i++) {
         hwaddr off = addr + i;
 
@@ -288,11 +283,6 @@ static void cup2006_scif_write(Cup2006MachineState *s, hwaddr base,
             }
         }
     }
-    cup2006_scif_note(s, phys, true, size, value);
-    qemu_log_mask(LOG_GUEST_ERROR,
-                  "cup2006: scif write pc=0x%08" PRIx32
-                  " addr=0x%08" HWADDR_PRIx " size=%u value=0x%" PRIx64 "\n",
-                  cup2006_guest_pc(), phys, size, value);
 }
 
 static uint64_t cup2006_scif_p4_read(void *opaque, hwaddr addr, unsigned size)
@@ -386,7 +376,7 @@ static void cup2006_scif0_update_irq(Cup2006MachineState *s)
          * STUB: the SH7770 INTC2 priority/enable for this line is
          * unmodelled, so the machine owns them; re-assert them at the
          * raise edge.
- */
+        */
         src->prio = CUP2006_SCIF0_INTC_PRIO;
         src->enable_count = src->enable_max;
     }
@@ -396,7 +386,7 @@ static void cup2006_scif0_update_irq(Cup2006MachineState *s)
          * STUB: re-assert the CPU interrupt line at the raise edge;
          * sh_intc_toggle_source only kicks the vCPU on a 0 -> 1 pending
          * transition.
- */
+        */
         cpu_interrupt(first_cpu, CPU_INTERRUPT_HARD);
     }
     trace_cup2006_subcpu_scif0_intevt_sysintr_byte(CUP2006_SCIF0_INTEVT, want ? "raised" : "released", CUP2006_SCIF0_SYSINTR, cup2006_scif0_rx_count(s), cup2006_scif0_rx_count(s) == 1 ? "" : "s");
@@ -417,7 +407,6 @@ void cup2006_scif0_tx_tick(void *opaque)
 static uint64_t cup2006_scif0_read(Cup2006MachineState *s, hwaddr base,
                                    hwaddr addr, unsigned size)
 {
-    hwaddr phys = base + addr;
     uint64_t value = 0;
     unsigned i;
 
@@ -453,10 +442,6 @@ static uint64_t cup2006_scif0_read(Cup2006MachineState *s, hwaddr base,
         }
         value |= (uint64_t)byte << (8 * i);
     }
-    qemu_log_mask(LOG_GUEST_ERROR,
-                  "cup2006: scif0 read pc=0x%08" PRIx32
-                  " addr=0x%08" HWADDR_PRIx " size=%u value=0x%" PRIx64 "\n",
-                  cup2006_guest_pc(), phys, size, value);
     return value;
 }
 
@@ -729,18 +714,19 @@ static void cup2006_key_guest_tx(Cup2006MachineState *s, uint8_t b)
         trace_cup2006_subcpu_keys_guest_acked_key(s->key_frames, s->key_guest_acks, s->key_guest_acks == 1 ? "" : "s");
         return;
     }
-    if (!s->keys) {
-        return;
-    }
     if (b == 0x15 && (s->peer_enq_armed || s->key_frame_inflight)) {
         /* The receiver rejected our offer/frame. Keep the report, including
-         * a key release, and retry the wire exchange after the collision.
-         * No input is generated by this timer: it retries the pending event.
-         * the guest's collision response is NAK 0x15. */
+         * a key release and the Sub-CPU's own status frames (which exist with
+         * keys=off too), and retry the wire exchange after the collision.
+         * No input is generated by this timer: it retries the pending
+         * event. */
         s->peer_enq_armed = false;
         s->key_frame_inflight = false;
         timer_mod(s->key_q_timer,
                   qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + 40);
+        return;
+    }
+    if (!s->keys) {
         return;
     }
     if (s->key_waiting >= 0 && b == 0x05 && !s->key_frame_inflight &&
@@ -978,7 +964,7 @@ static void cup2006_subpeer_guest_tx(Cup2006MachineState *s, uint8_t b)
             s->subpeer_reply_seq = 0x00;    /* STUB: the reply seq byte is 0x00 */
             s->subpeer_reply_data_len = 0;
             s->subpeer_reply_pending = true;
-            trace_cup2006_subcpu_subpeer_f5_takes_the();
+            trace_cup2006_subcpu_subpeer_f5_known_reply();
         } else if (s->subpeer_frame_total >= 4 &&
                    s->subpeer_frame[2] == 0xf1 && s->subpeer_frame[3] == 0x05) {
             /* f1 05's reply code is f1 85, but no reply data is known and a
@@ -991,7 +977,7 @@ static void cup2006_subpeer_guest_tx(Cup2006MachineState *s, uint8_t b)
             s->subpeer_reply_seq = 0x00;    /* STUB: the reply seq byte is 0x00 */
             s->subpeer_reply_data_len = 0;
             s->subpeer_reply_pending = true;
-            trace_cup2006_subcpu_subpeer_f2_takes_the();
+            trace_cup2006_subcpu_subpeer_f2_09_known_reply();
         /* `f2 02` (Sub-CPU firmware check) -> `f2 82` by the same
          * request|0x80 rule as f2 09 -> f2 89; seq 0x00, no data. */
         } else if (s->subpeer_frame_total >= 4 &&
@@ -1001,7 +987,7 @@ static void cup2006_subpeer_guest_tx(Cup2006MachineState *s, uint8_t b)
             s->subpeer_reply_seq = 0x00;    /* STUB: the reply seq byte is 0x00 */
             s->subpeer_reply_data_len = 0;
             s->subpeer_reply_pending = true;
-            trace_cup2006_subcpu_subpeer_f2_takes_the_2();
+            trace_cup2006_subcpu_subpeer_f2_02_known_reply();
         /* `fd 04 06` -> `fd 84`, the same row-pair rule as `f5 01 05` ->
          * `fd 83`; seq 0x00 (STUB) and no data bytes (the decoder's minimum
          * payload is `<code:2> <seq>`). */
@@ -1013,7 +999,7 @@ static void cup2006_subpeer_guest_tx(Cup2006MachineState *s, uint8_t b)
             s->subpeer_reply_seq = 0x00;    /* STUB: the reply seq byte is 0x00 */
             s->subpeer_reply_data_len = 0;
             s->subpeer_reply_pending = true;
-            trace_cup2006_subcpu_subpeer_fd_takes_the();
+            trace_cup2006_subcpu_subpeer_fd_known_reply();
         } else if (s->subpeer_frame_total >= 5 && !car_answers) {
             trace_cup2006_subcpu_subpeer_cmd_has_no(s->subpeer_frame[2], s->subpeer_frame[3]);
         }
@@ -1176,7 +1162,7 @@ void cup2006_wheel_tick(void *opaque)
 
     timer_mod(s->wheel_timer, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) +
               CUP2006_WHEEL_PERIOD_MS);
-    if (!s->track || !s->gps_track_start_ms) {
+    if (!s->track || !s->track_clock_started) {
         return;                          /* NEventWatcher not reading yet */
     }
     /* Start once the Sub-CPU link is up: the guest has taken the startup
@@ -1316,7 +1302,7 @@ static void cup2006_power_start(Cup2006MachineState *s)
     /* The application-layer notification is independent of the INTC stub. */
     cup2006_subpeer_queue_acc_off(s);
     if (!s->power_src_ready) {
-        trace_cup2006_subcpu_power_f12_ignored_the();
+        trace_cup2006_subcpu_power_f12_ignored();
         return;
     }
     s->power_pulses = 8;
@@ -1399,7 +1385,6 @@ const QemuInputHandler cup2006_key_handler = {
 static void cup2006_scif0_write(Cup2006MachineState *s, hwaddr base,
                                 hwaddr addr, uint64_t value, unsigned size)
 {
-    hwaddr phys = base + addr;
     unsigned i;
 
     if (addr + size <= CUP2006_SCIF_SIZE) {
@@ -1441,10 +1426,6 @@ static void cup2006_scif0_write(Cup2006MachineState *s, hwaddr base,
     }
     /* SCSCR/SCFCR/SCLSR writes can change the receive condition. */
     cup2006_scif0_update_irq(s);
-    qemu_log_mask(LOG_GUEST_ERROR,
-                  "cup2006: scif0 write pc=0x%08" PRIx32
-                  " addr=0x%08" HWADDR_PRIx " size=%u value=0x%" PRIx64 "\n",
-                  cup2006_guest_pc(), phys, size, value);
 }
 
 static uint64_t cup2006_scif0_p4_read(void *opaque, hwaddr addr, unsigned size)

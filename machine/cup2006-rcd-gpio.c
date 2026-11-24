@@ -195,14 +195,10 @@ static uint64_t cup2006_gpio_read(Cup2006MachineState *s, hwaddr base,
         }
     }
     cup2006_gpio_note(s, phys, false, size, value);
-    qemu_log_mask(LOG_GUEST_ERROR,
-                  "cup2006: gpio read pc=0x%08" PRIx32
-                  " addr=0x%08" HWADDR_PRIx " size=%u value=0x%" PRIx64 "\n",
-                  cup2006_guest_pc(), phys, size, value);
     return value;
 }
 
-/* Defined in cup2006-subcpu.c.inc: the onboard EEPROM's chip select (pin 83). */
+/* Defined in cup2006-subcpu.c: the onboard EEPROM's chip select (pin 83). */
 void cup2006_eeprom_cs(Cup2006MachineState *s, bool level);
 
 static void cup2006_gpio_write(Cup2006MachineState *s, hwaddr base,
@@ -225,10 +221,6 @@ static void cup2006_gpio_write(Cup2006MachineState *s, hwaddr base,
         }
     }
     cup2006_gpio_note(s, phys, true, size, value);
-    qemu_log_mask(LOG_GUEST_ERROR,
-                  "cup2006: gpio write pc=0x%08" PRIx32
-                  " addr=0x%08" HWADDR_PRIx " size=%u value=0x%" PRIx64 "\n",
-                  cup2006_guest_pc(), phys, size, value);
 }
 
 static uint64_t cup2006_gpio_p4_read(void *opaque, hwaddr addr, unsigned size)

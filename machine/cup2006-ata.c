@@ -416,7 +416,7 @@ void cup2006_intc2_write_at(Cup2006MachineState *s, hwaddr addr,
          * read back 0 once taken, so the ISR's read-modify-write of this
          * register carries only the bit of the line it services.  Each set
          * bit deasserts its model source: one pulse, one interrupt.
- */
+        */
         for (i = 0; i < CUP2006_DISP_LINES; i++) {
             if (!(val & cup2006_disp_ack_bit[i])) {
                 continue;
@@ -432,13 +432,13 @@ void cup2006_intc2_write_at(Cup2006MachineState *s, hwaddr addr,
          * OEMInterruptEnable and OEMInterruptDone(sysintr) share the
          * per-SYSINTR bit in +0x44 (0x11 -> bit 20, 0x12 -> bit 12,
          * 0x1A -> bit 22); count by bit to see repeated InterruptDone.
- */
+        */
         s->intc2_enabled |= val;
         /*
          * The 5line ISR acks/dones its SYSINTR 0x1C by setting bit 28
          * here (value 0x10000000), so this is the byte consumed; advance
          * the data port.
- */
+        */
         if ((val & CUP2006_DVD5_INTC2_BIT) && s->dvd5_intc_src &&
             s->dvd5_intc_src->asserted) {
             cup2006_dvd5_irq_ack(s);
@@ -459,7 +459,7 @@ void cup2006_intc2_write_at(Cup2006MachineState *s, hwaddr addr,
          * No delivery on the enable edge: a completion that happens with
          * the line still disabled stays latched in +0x004 and is not turned
          * into an interrupt.
- */
+        */
     } else {
         s->intc2_other++;
     }
@@ -508,7 +508,7 @@ void cup2006_ata_irq_fire(void *opaque)
         /*
          * INTRQ is a level held until the guest acknowledges it via the ack
          * register (+0x88); a plain status read must not clear it.
- */
+        */
         sh_intc_toggle_source(s->ata_intc_src, 0, 1);
         s->ata_irq_pending = false;
         s->ata_irq_raise++;
@@ -520,7 +520,7 @@ void cup2006_ata_irq_fire(void *opaque)
          * The line is still asserted: this completion shares the pending
          * INTRQ with an earlier one. Keep ata_irq_pending set so the ack
          * (+0x88) re-raises for it, delivered after the ack.
- */
+        */
         s->ata_irq_pending = true;
         s->ata_irq_drop++;
     }
@@ -541,7 +541,7 @@ static uint64_t cup2006_ata_read(void *opaque, hwaddr addr, unsigned size)
      * A status/command/alternate-status read does not deassert the
      * completion line; only the controller ack register (+0x88) clears it
      * (see cup2006_ata_write).
- */
+     */
 
     if (addr != CUP2006_ATA_DATA && s->ata_ident_reads &&
         addr == CUP2006_ATA_COMMAND) {
@@ -562,7 +562,7 @@ static uint64_t cup2006_ata_read(void *opaque, hwaddr addr, unsigned size)
     /*
      * +0x1c is the ATA command/status port: writes issue a command, reads
      * return device status; the latched status keeps bit 0 (ERR) clear.
- */
+     */
     if (addr == CUP2006_ATA_COMMAND) {
         return s->ata_status;
     }
@@ -573,7 +573,7 @@ static uint64_t cup2006_ata_read(void *opaque, hwaddr addr, unsigned size)
          * The data register is 16 bits wide: one IDENTIFY word per access
          * even for a 32-bit read (word in the low half, zero in the high);
          * an 8-bit access keeps the byte-stream form.
- */
+        */
         if (size == 1) {
             uint8_t byte = 0;
 
@@ -652,7 +652,7 @@ static void cup2006_ata_write(void *opaque, hwaddr addr, uint64_t value,
      * INTRQ is cleared by the controller ack register (+0x88), written by
      * the ISR after reading status; a plain status read must not drop
      * the interrupt.
- */
+     */
     if (addr == CUP2006_ATA_IRQ_ACK) {
         if (s->ata_intc_src && s->ata_intc_src->asserted) {
             sh_intc_toggle_source(s->ata_intc_src, 0, -1);
@@ -712,7 +712,7 @@ static void cup2006_ata_write(void *opaque, hwaddr addr, uint64_t value,
          * Command complete: schedule the SYSINTR-23 completion interrupt
          * (INTEVT 0x860). STUB: a real controller raises INTRQ at command
          * end; the +0x88 ack write clears it.
- */
+        */
         if (s->ata_intc_src && s->ata_irq_timer) {
             s->ata_irq_pending = true;
             s->ata_irq_cmds++;

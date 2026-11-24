@@ -8,8 +8,6 @@
 
 #include "melco-amdflash-core.h"
 
-static void core_autoselect_off(MelcoAmdFlashCore *c);
-
 /* Is this write a command byte `cmd` on every lane it occupies? */
 static bool core_cmd(const MelcoAmdFlashCore *c, uint64_t value,
                      unsigned size, uint8_t cmd)
@@ -46,35 +44,24 @@ void melco_amdflash_core_init(MelcoAmdFlashCore *c, uint8_t *data,
 
 void melco_amdflash_core_reset(MelcoAmdFlashCore *c)
 {
-    core_autoselect_off(c);
     c->state = MELCO_AMDFLASH_ST_READ;
     c->bypass = false;
+    c->autoselect = false;
+    c->autoselect_bank = 0;
     c->program_pending = false;
-    c->program_addr = 0;
 }
 
-static void core_autoselect(MelcoAmdFlashCore *c, uint64_t addr)
+/* The ID block autoselect serves at the bank base. */
+static const uint8_t *core_id_bytes(const MelcoAmdFlashCore *c)
 {
-    uint64_t bank = addr & ~(uint64_t)(c->sector_len - 1);
+    static _Thread_local uint8_t id[8];
 
-    if (!c->autoselect && bank + sizeof(c->id_save) <= c->size) {
-        memcpy(c->id_save, c->data + bank, sizeof(c->id_save));
-        memset(c->data + bank, 0, sizeof(c->id_save));
-        c->data[bank + 0] = c->id_manufacturer & 0xff;
-        c->data[bank + 1] = c->id_manufacturer >> 8;
-        c->data[bank + 2] = c->id_device & 0xff;
-        c->data[bank + 3] = c->id_device >> 8;
-        c->autoselect = true;
-        c->autoselect_bank = bank;
-    }
-}
-
-static void core_autoselect_off(MelcoAmdFlashCore *c)
-{
-    if (c->autoselect) {
-        memcpy(c->data + c->autoselect_bank, c->id_save, sizeof(c->id_save));
-        c->autoselect = false;
-    }
+    memset(id, 0, sizeof(id));
+    id[0] = c->id_manufacturer & 0xff;
+    id[1] = c->id_manufacturer >> 8;
+    id[2] = c->id_device & 0xff;
+    id[3] = c->id_device >> 8;
+    return id;
 }
 
 bool melco_amdflash_core_write(MelcoAmdFlashCore *c, uint64_t addr,
@@ -91,13 +78,16 @@ bool melco_amdflash_core_write(MelcoAmdFlashCore *c, uint64_t addr,
         return false;
     }
 
-    /* An armed program cycle takes the next write to its address as data,
-     * whatever its value. */
-    if (c->program_pending && addr == c->program_addr) {
+    /* An armed program cycle takes the next write as data, whatever its
+     * value and wherever it lands: the A0 goes to an unlock address and the
+     * data to the target address. */
+    if (c->program_pending) {
         c->program_pending = false;
         c->state = MELCO_AMDFLASH_ST_READ;
         for (i = 0; i < size && addr + i < c->size; i++) {
-            c->data[addr + i] = (value >> (8 * i)) & 0xff;
+            /* A program cycle can only clear bits: old & new.  Only an erase
+             * sets bits back to 1. */
+            c->data[addr + i] &= (value >> (8 * i)) & 0xff;
         }
         *off = addr;
         *len = i;
@@ -109,20 +99,37 @@ bool melco_amdflash_core_write(MelcoAmdFlashCore *c, uint64_t addr,
 
     /* F0 resets to read mode from anywhere. */
     if (is_cmd && cmd == 0xf0) {
-        core_autoselect_off(c);
         melco_amdflash_core_reset(c);
         return false;
     }
 
     switch (c->state) {
+    case MELCO_AMDFLASH_ST_BYPASS_EXIT:
+        /* 90 00 leaves unlock bypass.  Any other write is handled as in read
+         * mode, so a missed 00 cannot wedge the state machine. */
+        c->state = MELCO_AMDFLASH_ST_READ;
+        if (!cmd) {
+            c->bypass = false;
+            return false;
+        }
+        /* fall through */
     case MELCO_AMDFLASH_ST_READ:
         if (is_cmd && cmd == 0xaa) {
             c->state = MELCO_AMDFLASH_ST_U1;
         } else if (is_cmd && cmd == 0xa0) {
-            c->program_pending = true;
-            c->program_addr = addr;
+            /* A0 arms a program cycle only in unlock bypass mode; otherwise
+             * it needs the AA 55 unlock first. */
+            if (c->bypass) {
+                c->program_pending = true;
+            }
         } else if (is_cmd && cmd == 0x90) {
-            core_autoselect(c, addr);
+            if (c->bypass) {
+                c->state = MELCO_AMDFLASH_ST_BYPASS_EXIT;
+            } else {
+                c->autoselect = true;
+                c->autoselect_bank =
+                    addr & ~(uint64_t)(c->sector_len - 1);
+            }
         }
         /* Anything else (a lone 30 included) leaves the array unchanged. */
         break;
@@ -133,7 +140,6 @@ bool melco_amdflash_core_write(MelcoAmdFlashCore *c, uint64_t addr,
     case MELCO_AMDFLASH_ST_U2:
         if (is_cmd && cmd == 0xa0) {
             c->program_pending = true;
-            c->program_addr = addr;
             c->state = MELCO_AMDFLASH_ST_READ;
         } else if (is_cmd && cmd == 0x80) {
             c->state = MELCO_AMDFLASH_ST_ERASE;
@@ -141,7 +147,8 @@ bool melco_amdflash_core_write(MelcoAmdFlashCore *c, uint64_t addr,
             c->bypass = true;
             c->state = MELCO_AMDFLASH_ST_READ;
         } else if (is_cmd && cmd == 0x90) {
-            core_autoselect(c, addr);
+            c->autoselect = true;
+            c->autoselect_bank = addr & ~(uint64_t)(c->sector_len - 1);
             c->state = MELCO_AMDFLASH_ST_READ;
         } else {
             c->state = MELCO_AMDFLASH_ST_READ;
@@ -157,7 +164,7 @@ bool melco_amdflash_core_write(MelcoAmdFlashCore *c, uint64_t addr,
         break;
     case MELCO_AMDFLASH_ST_ERASE_ARMED:
         if (is_cmd && cmd == 0x30) {
-            /* STUB: sector erase completes instantly.  More 30s may follow. */
+            /* STUB: sector erase completes instantly. */
             uint64_t sector = addr & ~(uint64_t)(c->sector_len - 1);
             uint64_t slen = c->sector_len;
 
@@ -165,6 +172,7 @@ bool melco_amdflash_core_write(MelcoAmdFlashCore *c, uint64_t addr,
                 slen = c->size - sector;
             }
             memset(c->data + sector, 0xff, slen);
+            c->state = MELCO_AMDFLASH_ST_READ;
             *off = sector;
             *len = slen;
             *op = MELCO_AMDFLASH_OP_SECTOR_ERASE;
@@ -173,6 +181,7 @@ bool melco_amdflash_core_write(MelcoAmdFlashCore *c, uint64_t addr,
         if (is_cmd && cmd == 0x10) {
             /* STUB: chip erase completes instantly. */
             memset(c->data, 0xff, c->size);
+            c->state = MELCO_AMDFLASH_ST_READ;
             *off = 0;
             *len = c->size;
             *op = MELCO_AMDFLASH_OP_CHIP_ERASE;
@@ -192,8 +201,14 @@ uint64_t melco_amdflash_core_read(MelcoAmdFlashCore *c, uint64_t addr,
 
     for (i = 0; i < size; i++) {
         uint64_t a = addr + i;
-        uint8_t b = (a < c->size) ? c->data[a] : 0;
+        uint8_t b;
 
+        if (c->autoselect && a >= c->autoselect_bank &&
+            a - c->autoselect_bank < 8) {
+            b = core_id_bytes(c)[a - c->autoselect_bank];
+        } else {
+            b = (a < c->size) ? c->data[a] : 0;
+        }
         value |= (uint64_t)b << (8 * i);
     }
     if (size < 4) {

@@ -23,8 +23,9 @@ static void cup2006_mbx_write(Cup2006MachineState *s, hwaddr base,
      * +0x838 = 1 arms one descriptor. STUB: the request completes instantly
      * ("+0x12C bit 6 parameter memory ready") when the +0x130 bit-6 enable
      * is set; the render/TA-done status bits are set by the display
-     * model at the first status read (du.c.inc) — no rasteriser here.
- */
+     * model at the first status read (cup2006-du.c) — no rasteriser
+     * here.
+     */
     if (off == CUP2006_MBX_SURFACE_END && *slot == 1) {
         s->mbx_arm_seq++;
         s->mbx_arm_count++;
@@ -66,7 +67,7 @@ static void cup2006_mbx_write(Cup2006MachineState *s, hwaddr base,
     /*
      * +0x130 is the enable mask: the frame wait sets bit 6 after arming, but
      * a 0 -> 1 write with a fresh arm completes it too.
- */
+     */
     if (off == CUP2006_MBX_ENABLE && s->mbx_render_running &&
         !(*slot & CUP2006_MBX_STATUS_DONE)) {
         /* The client unmasked the render-done bit: the render is done
@@ -96,7 +97,7 @@ static void cup2006_mbx_write(Cup2006MachineState *s, hwaddr base,
     /*
      * +0x134 is the status write-1-to-clear: the ISR accumulates the +0x12C
      * bits it handled and writes them back here.
- */
+     */
     if (off == CUP2006_MBX_STATUS_ACK) {
         uint32_t ack = ((uint32_t)value & mask) << shift;
         uint32_t cleared = s->mbx_status & ack;

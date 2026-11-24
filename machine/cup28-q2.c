@@ -38,13 +38,10 @@ void cup28_q2_irq(Cup28MachineState *s)
 
 void cup28_q2_irq_init(Cup28MachineState *s, SuperHCPU *cpu)
 {
-    struct intc_desc *desc = cpu->env.intc_handle;
-    for (unsigned i = 0; desc && i < desc->nr_sources; i++) {
-        if (desc->sources[i].vect == 0x660) {
-            s->p28_q2_intc_src = &desc->sources[i];
-            s->p28_q2_intc_src->vect = 0x2e0;
-            break;
-        }
+    s->p28_q2_intc_src = cup28_intc_source(cpu, CUP28_INTEVT_Q2);
+    if (!s->p28_q2_intc_src) {
+        error_report("cup28: no INTC source for the Q2 interrupt");
+        exit(1);
     }
 }
 
@@ -180,17 +177,17 @@ static void cup28_q2_trap(Q2Canvas *c, int dxl, int xa, int ya, int xb, int yb)
     if (ya == yb) {
         return;
     }
-    /* Clip exactly to the clip window and the 1024x1024 surface first; the
-     * 2048 counters stay only as a safety net so a guest list cannot stall
-     * QEMU for minutes. */
-    y0 = MAX(MAX(y0, c->y0), 0);
+    /* Clip to the clip window and the 1024x1024 work plane: the loops below
+     * then cannot run longer than the plane itself, whatever the guest
+     * programs. */
+    y0 = MAX(MAX(MIN(y0, y1), MAX(c->y0, 0)), 0);
     y1 = MIN(MIN(y1, c->y1), CUP28_Q2_WORK_H - 1);
-    for (int y = y0; y < y1 && y - y0 < 2048; y++) {
+    for (int y = y0; y < y1; y++) {
         int x = xa + (y - ya) * (xb - xa) / (yb - ya);
         int lo = MAX(MAX(MIN(x, dxl), c->x0), 0);
         int hi = MIN(MIN(MAX(x, dxl), c->x1), CUP28_Q2_WORK_W - 1);
 
-        for (int px = lo; px < hi && px - lo < 2048; px++) {
+        for (int px = lo; px < hi; px++) {
             cup28_q2_work_put(c, px, y, 2);
         }
     }
@@ -789,9 +786,15 @@ static void cup28_q2_exec_list(Cup28MachineState *s, unsigned dl)
             int ymax = c.oy + cup28_q2_s12(cup28_q2_word(s, pc + 8));
             int x, y;
 
-            /* 4.3.3: CLRW zeroes the work coordinates, not the frame. */
-            for (y = ymin; y <= ymax && y - ymin < 2048; y++) {
-                for (x = xmin; x <= xmax && x - xmin < 2048; x++) {
+            /* 4.3.3: CLRW zeroes the work coordinates, not the frame.
+             * Clamped like FTRAP, so one write cannot walk the whole address
+             * space. */
+            ymin = MAX(MAX(ymin, c.y0), 0);
+            ymax = MIN(MIN(ymax, c.y1), CUP28_Q2_WORK_H - 1);
+            xmin = MAX(MAX(xmin, c.x0), 0);
+            xmax = MIN(MIN(xmax, c.x1), CUP28_Q2_WORK_W - 1);
+            for (y = ymin; y <= ymax; y++) {
+                for (x = xmin; x <= xmax; x++) {
                     cup28_q2_work_put(&c, x, y, 0);
                 }
             }

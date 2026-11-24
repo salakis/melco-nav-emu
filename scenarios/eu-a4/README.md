@@ -24,8 +24,8 @@ put. A unit that has had a fix starts faster.
 | `track.gpx` | the OSM geometry driven |
 | `route.json` | provenance: Overpass query, OSM data timestamp, way ids, heights, signal settings |
 
-Made with `tools/gps/osm_route.py --ref A-4 --bbox 38.80,-3.75,39.40,-3.30
---seconds 180` and the pipeline in `tools/gps/README.md`; the GPS signal
+Made with `src/melco_nav_emu/gnss/osm_route.py --ref A-4 --bbox 38.80,-3.75,39.40,-3.30
+--seconds 180` and the pipeline in `src/melco_nav_emu/gnss/README.md`; the GPS signal
 starts at GPS time 2009-09-09 09:09:15 (week 1548, TOW 292155).
 
 Map data © OpenStreetMap contributors, ODbL 1.0 (see scenarios/LICENSE).

@@ -92,7 +92,7 @@ static uint32_t cup2006_carsig_gyro(Cup2006MachineState *s)
     double yaw = 0;
     long v;
 
-    if (s->track && s->gps_track_start_ms) {
+    if (s->track && s->track_clock_started) {
         const MelcoSample *sample = melco_track_sample(
             s->track, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
 
@@ -153,7 +153,7 @@ static void cup2006_carsig_write(void *opaque, hwaddr base, hwaddr addr,
         /*
          * Any STATUS write with bit 15 set clears the sample, keeping the
          * line edge-like (a level line storms).
- */
+        */
         if (off == CUP2006_CARSIG_STATUS + 1 && (byte & 0x80)) {
             ack = true;
         }
@@ -171,7 +171,7 @@ static void cup2006_carsig_write(void *opaque, hwaddr base, hwaddr addr,
         /*
          * The ack clears the pending sample and drops the line (otherwise
          * the INTC source would stay asserted and the ISR would re-run).
- */
+        */
         s->carsig_irq_raised = false;
         /* bit 12 of +0x1004 is bit 4 of its high byte */
         s->carsig_file[CUP2006_CARSIG_STATUS + 1] &= ~0x10;

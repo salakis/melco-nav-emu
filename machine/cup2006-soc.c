@@ -85,18 +85,13 @@ static uint64_t cup2006_rtc_read(void *opaque, hwaddr addr, unsigned size)
         /*
          * The device is a 16-bit register file. Byte accesses address the
          * little-endian half of that file, matching the SH-4 bus.
- */
+        */
         off &= ~(hwaddr)1;
         shift = 8 * ((addr + i) & 1);
         cup2006_rtc_reg(s, off, &reg);
         value |= (uint64_t)((reg >> shift) & 0xff) << (8 * i);
     }
 
-    qemu_log_mask(LOG_GUEST_ERROR,
-                  "cup2006: rtc read pc=0x%08" PRIx32
-                  " addr=0x%08" HWADDR_PRIx " size=%u value=0x%" PRIx64
-                  "\n", cup2006_guest_pc(), CUP2006_RTC_BASE + addr, size,
-                  value);
     return value;
 }
 
@@ -109,11 +104,6 @@ static void cup2006_rtc_write(void *opaque, hwaddr addr, uint64_t value,
 {
     Cup2006MachineState *s = opaque;
 
-    qemu_log_mask(LOG_GUEST_ERROR,
-                  "cup2006: rtc write pc=0x%08" PRIx32
-                  " addr=0x%08" HWADDR_PRIx " size=%u value=0x%" PRIx64
-                  "\n", cup2006_guest_pc(), CUP2006_RTC_BASE + addr, size,
-                  value);
     if (size != 2) {
         return;
     }
@@ -173,7 +163,7 @@ static void cup2006_pcc_note(Cup2006MachineState *s, unsigned slot, hwaddr off,
         return;
     }
     s->pcc_seen[slot][off] |= bit;
-    trace_cup2006_soc_pcc_slot_prix64_size(slot, is_write ? "write" : "read", off, size, value, CUP2006_PCC_BASE + slot * CUP2006_PCC_SLOT_SIZE +
+    trace_cup2006_soc_pcc_slot_access(slot, is_write ? "write" : "read", off, size, value, CUP2006_PCC_BASE + slot * CUP2006_PCC_SLOT_SIZE +
             CUP2006_PCC_REGS_OFF + off);
 }
 
@@ -259,7 +249,7 @@ static void cup2006_pcc_cis_note(Cup2006PccCis *c, hwaddr off,
     {
         CPUSH4State *env = current_cpu ? (CPUSH4State *)cpu_env(current_cpu) : NULL;
 
-        trace_cup2006_soc_pcc_cis_prix64_size(is_write ? "write" : "read", off, size, value, CUP2006_PCC_BASE + base[c->base] + off, env ? env->pc : 0, env ? env->pr : 0);
+        trace_cup2006_soc_pcc_cis_access(is_write ? "write" : "read", off, size, value, CUP2006_PCC_BASE + base[c->base] + off, env ? env->pc : 0, env ? env->pr : 0);
     }
 }
 

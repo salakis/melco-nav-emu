@@ -1,9 +1,9 @@
-Subject: [PATCH 0007]
+Subject: [PATCH 0007] sh4: FLDI0/FLDI1 load the constant whatever FPSCR.PR is
+
 # melco-nav-emu core patch.
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Copyright (c) 2026 melco-nav-emu contributors
 # Modifies GPL-licensed QEMU sources; applied by scripts/qemu.sh.
- sh4: FLDI0/FLDI1 load the constant whatever FPSCR.PR is
 
 QEMU raises an illegal-instruction exception for FLDI0/FLDI1 when
 FPSCR.PR=1.  The SH-4 Software Manual (9.32/9.33) defines both only for

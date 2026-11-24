@@ -230,6 +230,12 @@ chip, `sensors.csv` for the car's wheel and gyro sensors on the same clock).
   indexes) keep an 8 MiB verified prefix and read as zeros after it. The map
   draws around Gothenburg; where its data is missing Navi throws
   (`LOC_MapCtl::MapSizeGet`) and the screen stops responding.
+- **DVD command set.** Only the commands the driver actually issues are
+  modelled (B8 93 sector reads, the media-status polls B8 80/81/01/04, B8 3A
+  command echo and the two post-"Loading start" queries); the reply bytes
+  follow the driver's own checks, so several are STUB values chosen to pass
+  them (documented at each site in `machine/cup2006-dvd.c`). A real drive
+  answers a much larger set.
 - **DVD reply address.** The drive's replies are also written to one fixed
   guest virtual address from one firmware build (the driver does not program
   that address in any modelled register), translated through the current
@@ -286,7 +292,7 @@ A scenario directory holds:
 The default `make boot` runs `python -m melco_nav_emu.cli boot`, which
 dispatches to the board module in `src/melco_nav_emu/boards/`; extra QEMU
 arguments go after `--`, e.g.
-`.venv/bin/python -m melco_nav_emu.cli boot --model cup28 -- --trace 'cup28_*'.
+`.venv/bin/python -m melco_nav_emu.cli boot --model cup28 -- --trace 'cup28_*'`.
 
 ## Layout
 
