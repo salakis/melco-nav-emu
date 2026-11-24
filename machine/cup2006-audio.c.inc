@@ -147,7 +147,7 @@ static void cup2006_adma_complete(Cup2006MachineState *s)
 /* The ISR's write of bit 1 to 0xFF801810 (cup2006_dvd5_write).  If the other
  * half finished before this acknowledge, its interrupt follows at once: the
  * driver refills one half per interrupt. */
-static void cup2006_adma_ack(Cup2006MachineState *s)
+void cup2006_adma_ack(Cup2006MachineState *s)
 {
     uint32_t status = cup2006_reg32_read(s->dvd5_reg, CUP2006_DMAC_STATUS, 4);
 
@@ -297,7 +297,7 @@ static void cup2006_adma_write(void *opaque, hwaddr addr, uint64_t value,
 
 static const MemoryRegionOps cup2006_adma_ops;
 
-static void cup2006_audio_init(Cup2006MachineState *s, MachineState *ms,
+void cup2006_audio_init(Cup2006MachineState *s, MachineState *ms,
                                MemoryRegion *sysmem, SuperHCPU *cpu)
 {
     struct intc_desc *desc = cpu->env.intc_handle;

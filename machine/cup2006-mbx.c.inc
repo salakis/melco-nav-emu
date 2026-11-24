@@ -153,7 +153,7 @@ static void cup2006_mbx_a7_write(void *opaque, hwaddr addr, uint64_t value,
     cup2006_mbx_write(opaque, CUP2006_MBX_A7_BASE, addr, value, size);
 }
 
-static const MemoryRegionOps cup2006_mbx_ops = {
+const MemoryRegionOps cup2006_mbx_ops = {
     .read = cup2006_mbx_p4_read,
     .write = cup2006_mbx_p4_write,
     .valid.min_access_size = 1,
@@ -161,7 +161,7 @@ static const MemoryRegionOps cup2006_mbx_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-static const MemoryRegionOps cup2006_mbx_a7_ops = {
+const MemoryRegionOps cup2006_mbx_a7_ops = {
     .read = cup2006_mbx_a7_read,
     .write = cup2006_mbx_a7_write,
     .valid.min_access_size = 1,
@@ -188,7 +188,7 @@ static void cup2006_mbx_mailbox_write(void *opaque, hwaddr addr,
                   " size=%u value=0x%" PRIx64 "\n", addr, size, value);
 }
 
-static const MemoryRegionOps cup2006_mbx_mailbox_ops = {
+const MemoryRegionOps cup2006_mbx_mailbox_ops = {
     .read = cup2006_mbx_mailbox_read,
     .write = cup2006_mbx_mailbox_write,
     .valid.min_access_size = 1,

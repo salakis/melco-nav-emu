@@ -100,7 +100,7 @@ static void cup2006_rcd_a7_write(void *opaque, hwaddr addr, uint64_t value,
     cup2006_rcd_write(opaque, CUP2006_RCD_A7_BASE, addr, value, size);
 }
 
-static const MemoryRegionOps cup2006_rcd_ops = {
+const MemoryRegionOps cup2006_rcd_ops = {
     .read = cup2006_rcd_p4_read,
     .write = cup2006_rcd_p4_write,
     .valid.min_access_size = 1,
@@ -108,7 +108,7 @@ static const MemoryRegionOps cup2006_rcd_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-static const MemoryRegionOps cup2006_rcd_a7_ops = {
+const MemoryRegionOps cup2006_rcd_a7_ops = {
     .read = cup2006_rcd_a7_read,
     .write = cup2006_rcd_a7_write,
     .valid.min_access_size = 1,
@@ -204,7 +204,7 @@ static uint64_t cup2006_gpio_read(Cup2006MachineState *s, hwaddr base,
 }
 
 /* Defined in cup2006-subcpu.c.inc: the onboard EEPROM's chip select (pin 83). */
-static void cup2006_eeprom_cs(Cup2006MachineState *s, bool level);
+void cup2006_eeprom_cs(Cup2006MachineState *s, bool level);
 
 static void cup2006_gpio_write(Cup2006MachineState *s, hwaddr base,
                                hwaddr addr, uint64_t value, unsigned size)
@@ -254,7 +254,7 @@ static void cup2006_gpio_a7_write(void *opaque, hwaddr addr, uint64_t value,
     cup2006_gpio_write(opaque, CUP2006_GPIO_A7_BASE, addr, value, size);
 }
 
-static const MemoryRegionOps cup2006_gpio_ops = {
+const MemoryRegionOps cup2006_gpio_ops = {
     .read = cup2006_gpio_p4_read,
     .write = cup2006_gpio_p4_write,
     .valid.min_access_size = 1,
@@ -262,7 +262,7 @@ static const MemoryRegionOps cup2006_gpio_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-static const MemoryRegionOps cup2006_gpio_a7_ops = {
+const MemoryRegionOps cup2006_gpio_a7_ops = {
     .read = cup2006_gpio_a7_read,
     .write = cup2006_gpio_a7_write,
     .valid.min_access_size = 1,

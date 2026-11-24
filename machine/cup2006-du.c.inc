@@ -15,7 +15,7 @@
  */
 /* The MBX log itself lives in the machine state (s->mbx_log; the capacity
  * is defined with the others in cup2006.c). */
-static void cup2006_mbx_note(Cup2006MachineState *s, hwaddr phys,
+void cup2006_mbx_note(Cup2006MachineState *s, hwaddr phys,
                              bool is_write, unsigned size, uint64_t value)
 {
     unsigned i;
@@ -51,7 +51,7 @@ static uint32_t cup2006_mbx_active_status(Cup2006MachineState *s)
     return s->mbx_status & ~mask & 0xffff & ~CUP2006_MBX_ST_POLLED;
 }
 
-static void cup2006_mbx_update_irq(Cup2006MachineState *s, const char *why)
+void cup2006_mbx_update_irq(Cup2006MachineState *s, const char *why)
 {
     struct intc_source *src = s->disp_intc_src[2];   /* INTEVT 0x900 */
     uint32_t active = cup2006_mbx_active_status(s);
@@ -74,7 +74,7 @@ static void cup2006_mbx_update_irq(Cup2006MachineState *s, const char *why)
     s->mbx_irq_active = now;
 }
 
-static uint64_t cup2006_mbx_read(Cup2006MachineState *s, hwaddr base,
+uint64_t cup2006_mbx_read(Cup2006MachineState *s, hwaddr base,
                                  hwaddr addr, unsigned size)
 {
     hwaddr phys = base + addr;
@@ -299,7 +299,7 @@ static const GraphicHwOps cup2006_display_ops = {
     .gfx_update = cup2006_display_gfx_update,
 };
 
-static void cup2006_display_create(Cup2006MachineState *s)
+void cup2006_display_create(Cup2006MachineState *s)
 {
     DisplaySurface *surface;
 
@@ -397,7 +397,7 @@ static void cup2006_du_update_irq(Cup2006MachineState *s)
     }
 }
 
-static void cup2006_du_flag_off(void *opaque)
+void cup2006_du_flag_off(void *opaque)
 {
     Cup2006MachineState *s = opaque;
 
@@ -430,7 +430,7 @@ static void cup2006_du_flip_plane(Cup2006MachineState *s, unsigned plane)
     cup2006_du_report(s, plane);
 }
 
-static void cup2006_du_frame_tick(void *opaque)
+void cup2006_du_frame_tick(void *opaque)
 {
     Cup2006MachineState *s = opaque;
     uint64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
@@ -544,7 +544,7 @@ static void cup2006_du_write(void *opaque, hwaddr addr, uint64_t value,
     cup2006_du_write_at(opaque, addr, value, size);
 }
 
-static const MemoryRegionOps cup2006_du_ops = {
+const MemoryRegionOps cup2006_du_ops = {
     .read = cup2006_du_read,
     .write = cup2006_du_write,
     .valid.min_access_size = 1,

@@ -56,7 +56,7 @@ static void cup2006_scif_rx_arm(Cup2006MachineState *s)
  * clock bytes out at the SCBRR rate; the driver only needs each byte to
  * arrive after its clear-RDF drain, not inside it.
  */
-static void cup2006_scif_rx_tick(void *opaque)
+void cup2006_scif_rx_tick(void *opaque)
 {
     Cup2006MachineState *s = opaque;
 
@@ -111,7 +111,7 @@ static void cup2006_eeprom_save(Cup2006MachineState *s)
     }
 }
 
-static void cup2006_eeprom_load(Cup2006MachineState *s)
+void cup2006_eeprom_load(Cup2006MachineState *s)
 {
     uint8_t img[2 * CUP2006_EEPROM_WORDS];
     FILE *f;
@@ -137,7 +137,7 @@ static void cup2006_eeprom_load(Cup2006MachineState *s)
 }
 
 /* Chip select (GPIO pin 83): its falling edge ends the transaction. */
-static void cup2006_eeprom_cs(Cup2006MachineState *s, bool level)
+void cup2006_eeprom_cs(Cup2006MachineState *s, bool level)
 {
     if (s->eeprom_cs && !level) {
         s->scif_tx_len = 0;
@@ -318,7 +318,7 @@ static void cup2006_scif_a7_write(void *opaque, hwaddr addr, uint64_t value,
     cup2006_scif_write(opaque, CUP2006_SCIF_A7_BASE, addr, value, size);
 }
 
-static const MemoryRegionOps cup2006_scif_ops = {
+const MemoryRegionOps cup2006_scif_ops = {
     .read = cup2006_scif_p4_read,
     .write = cup2006_scif_p4_write,
     .valid.min_access_size = 1,
@@ -326,7 +326,7 @@ static const MemoryRegionOps cup2006_scif_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-static const MemoryRegionOps cup2006_scif_a7_ops = {
+const MemoryRegionOps cup2006_scif_a7_ops = {
     .read = cup2006_scif_a7_read,
     .write = cup2006_scif_a7_write,
     .valid.min_access_size = 1,
@@ -406,7 +406,7 @@ static void cup2006_scif0_update_irq(Cup2006MachineState *s)
 /* End of one transmitted byte: one byte time later the transmit FIFO is
  * empty again (TDFE/TEND set, sh7751 manual p.738-739). STUB: the byte
  * time is a fixed 1 ms; the model only dates the status flags. */
-static void cup2006_scif0_tx_tick(void *opaque)
+void cup2006_scif0_tx_tick(void *opaque)
 {
     Cup2006MachineState *s = opaque;
 
@@ -502,7 +502,7 @@ static const Cup2006KeyEntry *cup2006_key_lookup(QKeyCode q)
 }
 
 /* Peer UART transmitter: move at most one paced byte into the RX FIFO. */
-static void cup2006_scif0_peer_pump(void *opaque)
+void cup2006_scif0_peer_pump(void *opaque)
 {
     Cup2006MachineState *s = opaque;
 
@@ -597,7 +597,6 @@ static void cup2006_key_put_frame_enc(Cup2006MachineState *s, uint16_t key,
  * 100 ms from the track speed. STUB: the real producer is not modelled. */
 #define CUP2006_WHEEL_FLAG       0x10000
 #define CUP2006_STATUS_FLAG      0x20000    /* | 16-bit code: a Sub-CPU status frame */
-#define CUP2006_WHEEL_PERIOD_MS  100
 #define CUP2006_PULSES_PER_M     0.44902
 
 static void cup2006_wheel_put_frame(Cup2006MachineState *s, int16_t pulses)
@@ -1106,7 +1105,7 @@ static void cup2006_key_start(Cup2006MachineState *s)
 #define CUP2006_SUBPEER_GRANT_MS 50
 
 /* Latch the next queued report if the exchange is idle. */
-static void cup2006_key_pump(void *opaque)
+void cup2006_key_pump(void *opaque)
 {
     Cup2006MachineState *s = opaque;
     int64_t now = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL);
@@ -1171,7 +1170,7 @@ static void cup2006_key_enqueue(Cup2006MachineState *s, int code, bool raw)
 }
 
 /* 100 ms: one 0x0285 wheel frame from the track speed (once GPS runs). */
-static void cup2006_wheel_tick(void *opaque)
+void cup2006_wheel_tick(void *opaque)
 {
     Cup2006MachineState *s = opaque;
     long n;
@@ -1226,7 +1225,7 @@ static void cup2006_wheel_tick(void *opaque)
  * Sub-CPU when the car's ignition/ACC line drops (INTEVT 0x240 ->
  * SYSINTR 0x1d). Host-controlled (F12 under acckey=on), off by default;
  * no guest state is written. */
-static void cup2006_power_drop(void *opaque)
+void cup2006_power_drop(void *opaque)
 {
     Cup2006MachineState *s = opaque;
 
@@ -1237,7 +1236,7 @@ static void cup2006_power_drop(void *opaque)
     s->power_irq_raised = false;
 }
 
-static void cup2006_power_pulse(void *opaque)
+void cup2006_power_pulse(void *opaque)
 {
     Cup2006MachineState *s = opaque;
 
@@ -1391,7 +1390,7 @@ static void cup2006_key_input(DeviceState *dev, QemuConsole *src,
     cup2006_key_enqueue(s, e->raw >= 0 ? e->raw : e->code, e->raw >= 0);
 }
 
-static const QemuInputHandler cup2006_key_handler = {
+const QemuInputHandler cup2006_key_handler = {
     .name  = "cup2006-keypad",
     .mask  = INPUT_EVENT_MASK_KEY,
     .event = cup2006_key_input,
@@ -1471,7 +1470,7 @@ static void cup2006_scif0_a7_write(void *opaque, hwaddr addr, uint64_t value,
     cup2006_scif0_write(opaque, CUP2006_SCIF0_A7_BASE, addr, value, size);
 }
 
-static const MemoryRegionOps cup2006_scif0_ops = {
+const MemoryRegionOps cup2006_scif0_ops = {
     .read = cup2006_scif0_p4_read,
     .write = cup2006_scif0_p4_write,
     .valid.min_access_size = 1,
@@ -1479,7 +1478,7 @@ static const MemoryRegionOps cup2006_scif0_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-static const MemoryRegionOps cup2006_scif0_a7_ops = {
+const MemoryRegionOps cup2006_scif0_a7_ops = {
     .read = cup2006_scif0_a7_read,
     .write = cup2006_scif0_a7_write,
     .valid.min_access_size = 1,

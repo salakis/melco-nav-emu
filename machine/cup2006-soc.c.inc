@@ -19,7 +19,7 @@ static void cup2006_cpg_write(void *opaque, hwaddr addr, uint64_t value,
     cup2006_mmio_write(CUP2006_CPG_BASE + addr, value, size);
 }
 
-static const MemoryRegionOps cup2006_cpg_ops = {
+const MemoryRegionOps cup2006_cpg_ops = {
     .read = cup2006_cpg_read,
     .write = cup2006_cpg_write,
     .valid.min_access_size = 1,
@@ -134,7 +134,7 @@ static void cup2006_rtc_write(void *opaque, hwaddr addr, uint64_t value,
     }
 }
 
-static const MemoryRegionOps cup2006_rtc_ops = {
+const MemoryRegionOps cup2006_rtc_ops = {
     .read = cup2006_rtc_read,
     .write = cup2006_rtc_write,
     .valid.min_access_size = 1,
@@ -148,7 +148,7 @@ static const MemoryRegionOps cup2006_rtc_ops = {
 /* STUB: the card's initial attribute-memory content at page 0 offset 0:
  * the CIS tuple chain (DEVICE, CONFIG, FUNCID=ATA, FUNCE, CFTABLE_ENTRY,
  * END) a card answers with before the guest writes it. */
-static const uint8_t cup2006_pcc_cis[] = {
+const uint8_t cup2006_pcc_cis[] = {
     0x01, 0x00, 0x02, 0x00, 0x0d, 0x00, 0x00, 0x00,     /* DEVICE */
     0x1a, 0x00, 0x05, 0x00, 0x01, 0x00, 0x01, 0x00,     /* CONFIG */
     0x00, 0x00, 0x02, 0x00, 0x03, 0x00,
@@ -178,7 +178,7 @@ static void cup2006_pcc_note(Cup2006MachineState *s, unsigned slot, hwaddr off,
             CUP2006_PCC_REGS_OFF + off);
 }
 
-static uint64_t cup2006_pcc_regs_read(void *opaque, hwaddr addr, unsigned size)
+uint64_t cup2006_pcc_regs_read(void *opaque, hwaddr addr, unsigned size)
 {
     Cup2006PccRegs *regs = opaque;
     Cup2006MachineState *s = regs->s;
@@ -227,7 +227,7 @@ static void cup2006_pcc_regs_write(void *opaque, hwaddr addr, uint64_t value,
     cup2006_pcc_note(s, slot, off, size, true, value);
 }
 
-static const MemoryRegionOps cup2006_pcc_regs_ops = {
+const MemoryRegionOps cup2006_pcc_regs_ops = {
     .read = cup2006_pcc_regs_read,
     .write = cup2006_pcc_regs_write,
     .valid.min_access_size = 1,
@@ -301,7 +301,7 @@ static void cup2006_pcc_cis_write(void *opaque, hwaddr addr, uint64_t value,
     cup2006_pcc_cis_note(c, addr, size, true, value);
 }
 
-static const MemoryRegionOps cup2006_pcc_cis_ops = {
+const MemoryRegionOps cup2006_pcc_cis_ops = {
     .read = cup2006_pcc_cis_read,
     .write = cup2006_pcc_cis_write,
     .valid.min_access_size = 1,

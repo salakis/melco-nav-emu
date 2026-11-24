@@ -36,7 +36,7 @@ static uint64_t cup2006_dg_read_at(Cup2006MachineState *s, hwaddr base,
 #define CUP2006_DG_SURF_W 512
 #define CUP2006_DG_SURF_H 234
 
-static uint8_t *cup2006_dg_ram_ptr(Cup2006MachineState *s, uint32_t addr,
+uint8_t *cup2006_dg_ram_ptr(Cup2006MachineState *s, uint32_t addr,
                                    uint32_t len)
 {
     uint32_t pa = addr & 0x1fffffffu;   /* P1/P2 alias of the same RAM */
@@ -1514,7 +1514,7 @@ static void cup2006_dg_a7_write(void *opaque, hwaddr addr, uint64_t value,
     cup2006_dg_write_at(opaque, CUP2006_DG_A7_BASE, addr, value, size);
 }
 
-static const MemoryRegionOps cup2006_dg_ops = {
+const MemoryRegionOps cup2006_dg_ops = {
     .read = cup2006_dg_p4_read,
     .write = cup2006_dg_p4_write,
     .valid.min_access_size = 1,
@@ -1522,7 +1522,7 @@ static const MemoryRegionOps cup2006_dg_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-static const MemoryRegionOps cup2006_dg_a7_ops = {
+const MemoryRegionOps cup2006_dg_a7_ops = {
     .read = cup2006_dg_a7_read,
     .write = cup2006_dg_a7_write,
     .valid.min_access_size = 1,

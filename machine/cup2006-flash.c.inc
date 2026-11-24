@@ -16,7 +16,7 @@
 #define CUP2006_BKRAM_BASE 0x19400000
 #define CUP2006_BKRAM_SIZE 0x00100000
 
-static void cup2006_bkram_init(Cup2006MachineState *s, MemoryRegion *sysmem)
+void cup2006_bkram_init(Cup2006MachineState *s, MemoryRegion *sysmem)
 {
     const char *path = s->bkram_file;
     struct stat st;
@@ -41,7 +41,7 @@ static void cup2006_bkram_init(Cup2006MachineState *s, MemoryRegion *sysmem)
  * NVRAM region mapped over that part of RAM.
  * STUB: the file stands in for the backup battery.
  */
-static void cup2006_sramsave_init(Cup2006MachineState *s, MemoryRegion *sysmem)
+void cup2006_sramsave_init(Cup2006MachineState *s, MemoryRegion *sysmem)
 {
     const char *path = s->sramsave;
     hwaddr base = memory_region_size(&s->ram) - CUP2006_SRAM_SIZE;

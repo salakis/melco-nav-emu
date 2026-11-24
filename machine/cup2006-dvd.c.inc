@@ -46,7 +46,7 @@ static void cup2006_dvd5_irq_next(Cup2006MachineState *s)
 /* STUB: instant spin-up: a drive that reported "loading" finishes and tells
  * the host with an unsolicited B1 status frame (frame[1]=0x48 class 0x40
  * ready, frame[3]=4, 11 bytes, rest zero). */
-static void cup2006_dvd5_spinup(Cup2006MachineState *s)
+void cup2006_dvd5_spinup(Cup2006MachineState *s)
 {
     static const uint8_t b1[11] = {
         0xb1, CUP2006_DVD5_ST_ROM, 0x20, CUP2006_DVD5_TYPE_DVDROM,
@@ -110,7 +110,7 @@ static void cup2006_dvd5_status_b1(Cup2006MachineState *s, uint8_t st,
 /* A disc goes in (the next of dvdimage=/dvdnext=, cycling); the drive then
  * reports "loading" (class 0x30 + present, type 0), "packed in" (type 1),
  * and "ready" via the spin-up B1. STUB: type 1's drive-side name is unknown. */
-static void cup2006_dvd_insert(void *opaque)
+void cup2006_dvd_insert(void *opaque)
 {
     Cup2006MachineState *s = opaque;
     Error *err = NULL;
@@ -144,7 +144,7 @@ static void cup2006_dvd_insert(void *opaque)
  * (board GPIO port 3 bit 8). Closed at power-on, as on a unit with its
  * map disc in.
  */
-static void cup2006_dvd_shutter_key(Cup2006MachineState *s)
+void cup2006_dvd_shutter_key(Cup2006MachineState *s)
 {
     s->dvd_shutter_open = !s->dvd_shutter_open;
     trace_cup2006_dvd_drive_shutter_at_ms(s->dvd_shutter_open ? "opened" : "closed", qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
@@ -154,7 +154,7 @@ static void cup2006_dvd_shutter_key(Cup2006MachineState *s)
  * (B1 class 0x10 + present), in-slot -> taken (B1 class 0x00, next disc goes
  * in 3 s later), empty -> insert the next disc now. STUB: while a disc sits
  * ejected, status and read replies carry class 0x90. */
-static void cup2006_dvd_eject_button(Cup2006MachineState *s)
+void cup2006_dvd_eject_button(Cup2006MachineState *s)
 {
     if (!s->dvd5irq) {
         return;
@@ -181,7 +181,7 @@ static void cup2006_dvd_eject_button(Cup2006MachineState *s)
 /* The OAL ISR acked 0xFFE00044 bit 28: the line is serviced; the byte itself
  * is consumed by the ISR's read of the data port (a receive register pops
  * on read). Here only deassert and present whatever is still staged. */
-static void cup2006_dvd5_irq_ack(Cup2006MachineState *s)
+void cup2006_dvd5_irq_ack(Cup2006MachineState *s)
 {
     struct intc_source *src = s->dvd5_intc_src;
 
@@ -421,9 +421,9 @@ static uint64_t cup2006_dvd5_read(void *opaque, hwaddr addr, unsigned size)
     return value;
 }
 
-static void cup2006_adma_ack(Cup2006MachineState *s);
+void cup2006_adma_ack(Cup2006MachineState *s);
 
-static void cup2006_dvd5_write(void *opaque, hwaddr addr, uint64_t value,
+void cup2006_dvd5_write(void *opaque, hwaddr addr, uint64_t value,
                                unsigned size)
 {
     Cup2006MachineState *s = opaque;
@@ -525,7 +525,7 @@ static void cup2006_dvdst_write(void *opaque, hwaddr addr, uint64_t value,
     trace_cup2006_dvd_dvdst_write_pc_addr(cup2006_guest_pc(), CUP2006_DVDST_BASE + addr, size, value);
 }
 
-static const MemoryRegionOps cup2006_dvd5_ops = {
+const MemoryRegionOps cup2006_dvd5_ops = {
     .read = cup2006_dvd5_read,
     .write = cup2006_dvd5_write,
     .valid.min_access_size = 1,
@@ -533,7 +533,7 @@ static const MemoryRegionOps cup2006_dvd5_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-static const MemoryRegionOps cup2006_dvd5_win_ops = {
+const MemoryRegionOps cup2006_dvd5_win_ops = {
     .read = cup2006_dvd5_req_read,
     .write = cup2006_dvd5_req_write,
     .valid.min_access_size = 1,
@@ -541,7 +541,7 @@ static const MemoryRegionOps cup2006_dvd5_win_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-static const MemoryRegionOps cup2006_dvd5_rpl_ops = {
+const MemoryRegionOps cup2006_dvd5_rpl_ops = {
     .read = cup2006_dvd5_rpl_read,
     .write = cup2006_dvd5_rpl_write,
     .valid.min_access_size = 1,
@@ -549,7 +549,7 @@ static const MemoryRegionOps cup2006_dvd5_rpl_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-static const MemoryRegionOps cup2006_dvdst_ops = {
+const MemoryRegionOps cup2006_dvdst_ops = {
     .read = cup2006_dvdst_read,
     .write = cup2006_dvdst_write,
     .valid.min_access_size = 1,

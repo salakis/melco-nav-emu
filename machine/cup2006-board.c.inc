@@ -43,7 +43,7 @@ static void cup2006_uart_write(void *opaque, hwaddr addr, uint64_t value,
                   CUP2006_UART_BASE + addr, size, value);
 }
 
-static const MemoryRegionOps cup2006_unknown_ops = {
+const MemoryRegionOps cup2006_unknown_ops = {
     .read = cup2006_unknown_read,
     .write = cup2006_unknown_write,
     .valid.min_access_size = 1,
@@ -51,7 +51,7 @@ static const MemoryRegionOps cup2006_unknown_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-static const MemoryRegionOps cup2006_board_ops = {
+const MemoryRegionOps cup2006_board_ops = {
     .read = cup2006_board_read,
     .write = cup2006_board_write,
     .valid.min_access_size = 1,
@@ -59,7 +59,7 @@ static const MemoryRegionOps cup2006_board_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-static const MemoryRegionOps cup2006_board_a7_ops = {
+const MemoryRegionOps cup2006_board_a7_ops = {
     .read = cup2006_board_a7_read,
     .write = cup2006_board_a7_write,
     .valid.min_access_size = 1,
@@ -67,7 +67,7 @@ static const MemoryRegionOps cup2006_board_a7_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-static const MemoryRegionOps cup2006_uart_ops = {
+const MemoryRegionOps cup2006_uart_ops = {
     .read = cup2006_uart_read,
     .write = cup2006_uart_write,
     .valid.min_access_size = 1,
@@ -129,7 +129,7 @@ static void cup2006_selftest_write(void *opaque, hwaddr addr, uint64_t value,
     cup2006_mmio_write(CUP2006_SELFTEST_BASE + addr, value, size);
 }
 
-static const MemoryRegionOps cup2006_selftest_ops = {
+const MemoryRegionOps cup2006_selftest_ops = {
     .read = cup2006_selftest_read,
     .write = cup2006_selftest_write,
     .valid.min_access_size = 1,
@@ -144,7 +144,7 @@ static const MemoryRegionOps cup2006_selftest_ops = {
  */
 /* The GPS log itself lives in the machine state (s->gps_log; the capacity
  * is defined with the others in cup2006.c). */
-static void cup2006_gps_note(Cup2006MachineState *s, hwaddr phys,
+void cup2006_gps_note(Cup2006MachineState *s, hwaddr phys,
                              bool is_write, unsigned size, uint64_t value)
 {
     unsigned i;
@@ -189,7 +189,7 @@ static void cup2006_i2c_start_completion(Cup2006MachineState *s)
               qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + CUP2006_I2C_XFER_NS);
 }
 
-static void cup2006_i2c_complete(void *opaque)
+void cup2006_i2c_complete(void *opaque)
 {
     Cup2006MachineState *s = opaque;
 
@@ -295,7 +295,7 @@ static void cup2006_i2c_a7_write(void *opaque, hwaddr addr, uint64_t value,
     cup2006_i2c_write(opaque, CUP2006_I2C_A7_BASE, addr, value, size);
 }
 
-static const MemoryRegionOps cup2006_i2c_ops = {
+const MemoryRegionOps cup2006_i2c_ops = {
     .read = cup2006_i2c_phys_read,
     .write = cup2006_i2c_phys_write,
     .valid.min_access_size = 1,
@@ -303,7 +303,7 @@ static const MemoryRegionOps cup2006_i2c_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-static const MemoryRegionOps cup2006_i2c_a7_ops = {
+const MemoryRegionOps cup2006_i2c_a7_ops = {
     .read = cup2006_i2c_a7_read,
     .write = cup2006_i2c_a7_write,
     .valid.min_access_size = 1,

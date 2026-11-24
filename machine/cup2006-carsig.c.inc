@@ -72,7 +72,7 @@ static void cup2006_carsig_sample(Cup2006MachineState *s)
     cup2006_carsig_update_irq(s);
 }
 
-static void cup2006_carsig_tick(void *opaque)
+void cup2006_carsig_tick(void *opaque)
 {
     Cup2006MachineState *s = opaque;
 
@@ -231,7 +231,7 @@ static void cup2006_carsig_a7_write(void *opaque, hwaddr addr,
     cup2006_carsig_write(opaque, CUP2006_CARSIG_A7_BASE, addr, value, size);
 }
 
-static const MemoryRegionOps cup2006_carsig_ops = {
+const MemoryRegionOps cup2006_carsig_ops = {
     .read = cup2006_carsig_p4_read,
     .write = cup2006_carsig_p4_write,
     .valid.min_access_size = 1,
@@ -239,7 +239,7 @@ static const MemoryRegionOps cup2006_carsig_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-static const MemoryRegionOps cup2006_carsig_a7_ops = {
+const MemoryRegionOps cup2006_carsig_a7_ops = {
     .read = cup2006_carsig_a7_read,
     .write = cup2006_carsig_a7_write,
     .valid.min_access_size = 1,

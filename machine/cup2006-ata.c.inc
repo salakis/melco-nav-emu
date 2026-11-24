@@ -30,7 +30,7 @@ static void cup2006_ata_event(Cup2006MachineState *s)
 }
 
 /* Exact counters at exit, past the last power-of-two summary line. */
-static void cup2006_ata_exit(Notifier *n, void *data)
+void cup2006_ata_exit(Notifier *n, void *data)
 {
     Cup2006MachineState *s = container_of(n, Cup2006MachineState, ata_exit);
 
@@ -353,7 +353,7 @@ static void cup2006_ata_dma_complete(Cup2006MachineState *s)
  * The three lines' INTEVT numbers, for messages only; the sources are the DU
  * model (0x780) and the MBX status/enable/ack contract (0x900).
  */
-static const uint16_t cup2006_disp_intevt[CUP2006_DISP_LINES] = {
+const uint16_t cup2006_disp_intevt[CUP2006_DISP_LINES] = {
     CUP2006_DISP_INTEVT_DTD0,
     CUP2006_DISP_INTEVT_DTD1,
     CUP2006_DISP_INTEVT_MBX,
@@ -399,7 +399,7 @@ static uint64_t cup2006_intc2_a7_read(void *opaque, hwaddr addr, unsigned size)
     return cup2006_intc2_read_at(opaque, CUP2006_INTC2_A7_BASE, addr, size);
 }
 
-static void cup2006_intc2_write_at(Cup2006MachineState *s, hwaddr addr,
+void cup2006_intc2_write_at(Cup2006MachineState *s, hwaddr addr,
                                    uint64_t value, unsigned size)
 {
     hwaddr off = addr & (CUP2006_INTC2_SIZE - 1);
@@ -478,7 +478,7 @@ static void cup2006_intc2_a7_write(void *opaque, hwaddr addr, uint64_t value,
     cup2006_intc2_write_at(opaque, addr, value, size);
 }
 
-static const MemoryRegionOps cup2006_intc2_ops = {
+const MemoryRegionOps cup2006_intc2_ops = {
     .read = cup2006_intc2_read,
     .write = cup2006_intc2_write,
     .valid.min_access_size = 1,
@@ -486,7 +486,7 @@ static const MemoryRegionOps cup2006_intc2_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-static const MemoryRegionOps cup2006_intc2_a7_ops = {
+const MemoryRegionOps cup2006_intc2_a7_ops = {
     .read = cup2006_intc2_a7_read,
     .write = cup2006_intc2_a7_write,
     .valid.min_access_size = 1,
@@ -494,7 +494,7 @@ static const MemoryRegionOps cup2006_intc2_a7_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-static void cup2006_ata_irq_fire(void *opaque)
+void cup2006_ata_irq_fire(void *opaque)
 {
     Cup2006MachineState *s = opaque;
 
@@ -720,7 +720,7 @@ static void cup2006_ata_write(void *opaque, hwaddr addr, uint64_t value,
     }
 }
 
-static const MemoryRegionOps cup2006_ata_ops = {
+const MemoryRegionOps cup2006_ata_ops = {
     .read = cup2006_ata_read,
     .write = cup2006_ata_write,
     .valid.min_access_size = 1,

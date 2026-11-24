@@ -14,7 +14,7 @@ def test_key_transactions_keep_release_and_wait_for_frame_ack(tmp_path):
              'cup2006_key_start', 'cup2006_key_pump', 'cup2006_key_enqueue']
     bodies = []
     for name in names:
-        match = re.search(r'static void ' + name + r'\([^;]+?\)\n\{', source)
+        match = re.search(r'(?:static )?void ' + name + r'\([^;]+?\)\n\{', source)
         assert match, name
         depth, end = 1, match.end()
         while depth:

@@ -8,7 +8,7 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
-static void cup2006_mbx_ta_frame(Cup2006MachineState *s);
+void cup2006_mbx_ta_frame(Cup2006MachineState *s);
 
 static void cup2006_gps_update_irq(Cup2006MachineState *s)
 {
@@ -33,7 +33,7 @@ static void cup2006_gps_update_irq(Cup2006MachineState *s)
  * at virtual time 0 defers to the first use exactly like the old
  * gps_track_start_ms == 0 check did.
  */
-static void cup2006_track_clock_start(Cup2006MachineState *s, int64_t now_ms)
+void cup2006_track_clock_start(Cup2006MachineState *s, int64_t now_ms)
 {
     if (!s->gps_track_start_ms) {
         s->gps_track_start_ms = now_ms;
@@ -202,7 +202,7 @@ static void cup2006_gnss_host_tx(Cup2006MachineState *s)
     }
 }
 
-static void cup2006_gps_tick(void *opaque)
+void cup2006_gps_tick(void *opaque)
 {
     Cup2006MachineState *s = opaque;
     uint32_t *r = s->gps_regs_w;
@@ -329,7 +329,7 @@ static void cup2006_gps_a7_write(void *opaque, hwaddr addr, uint64_t value,
     cup2006_gps_write(opaque, CUP2006_GPS_A7_BASE, addr, value, size);
 }
 
-static const MemoryRegionOps cup2006_gps_ops = {
+const MemoryRegionOps cup2006_gps_ops = {
     .read = cup2006_gps_p4_read,
     .write = cup2006_gps_p4_write,
     .valid.min_access_size = 1,
@@ -337,7 +337,7 @@ static const MemoryRegionOps cup2006_gps_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-static const MemoryRegionOps cup2006_gps_a7_ops = {
+const MemoryRegionOps cup2006_gps_a7_ops = {
     .read = cup2006_gps_a7_read,
     .write = cup2006_gps_a7_write,
     .valid.min_access_size = 1,
