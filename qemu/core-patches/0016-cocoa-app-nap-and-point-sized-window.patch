@@ -1,0 +1,58 @@
+Subject: [PATCH 0016] cocoa: opt out of App Nap and size the window in points
+
+# melco-nav-emu core patch.
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (c) 2026 melco-nav-emu contributors
+# Modifies GPL-licensed QEMU sources; applied by scripts/qemu.sh.
+
+Both boards boot and run their firmware on the host's real clock: the CU-P2006
+GPS replay and CUP28's MOST peer are driven from QEMU_CLOCK_VIRTUAL against
+wall time, and bootcheck stops on virtual time.  App Nap coalesces the timers
+of a process whose window is hidden, fully occluded or on another Space, and
+the guest then sees virtual time stretch against the host: a first power-on
+measured in seconds of guest time becomes unpredictable minutes.  The activity
+is taken for the life of the process, because the board models have no idle
+state to declare.
+
+The window sizing is a second, visual defect on a Retina host: divide by
+backingScaleFactor and a 400x234 panel is laid out in device pixels, so it
+occupies a quarter of its intended area.  One guest pixel per point is what
+QEMU 9.1 did and what these panels are drawn for; zoom-to-fit, the default for
+both boards, scales it from there.
+
+This does not change any device model, so it cannot alter what the guest sees.
+
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -500,10 +500,9 @@
+     [[self window] setContentAspectRatio:NSMakeSize(screen.width, screen.height)];
+ 
+     if (!([[self window] styleMask] & NSWindowStyleMaskResizable)) {
+-        CGFloat width = screen.width / [[self window] backingScaleFactor];
+-        CGFloat height = screen.height / [[self window] backingScaleFactor];
+-
+-        [[self window] setContentSize:NSMakeSize(width, height)];
++        /* One guest pixel per point, as QEMU 9.1 sized it: one per device
++         * pixel quarters a 400x234 panel on a Retina display. */
++        [[self window] setContentSize:NSMakeSize(screen.width, screen.height)];
+         [[self window] center];
+     } else if ([[self window] styleMask] & NSWindowStyleMaskFullScreen) {
+         [[self window] setContentSize:[self fixAspectRatio:[self screenSafeAreaSize]]];
+@@ -1973,6 +1972,17 @@
+     TransformProcessType(&psn, kProcessTransformToForegroundApplication);
+ 
+     [QemuApplication sharedApplication];
++
++    /*
++     * Opt out of App Nap. Both machines run their firmware against the host
++     * clock and a boot is measured in guest time, so a hidden or occluded
++     * window must not have its timers coalesced. The activity is never ended:
++     * it lasts as long as the process.
++     */
++    (void)[[NSProcessInfo processInfo]
++              beginActivityWithOptions:NSActivityUserInitiated |
++                                         NSActivityLatencyCritical
++                                reason:@"emulating hardware in real time"];
+ 
+     // Create an Application controller
+     QemuCocoaAppController *controller = [[QemuCocoaAppController alloc] init];
