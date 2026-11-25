@@ -7,7 +7,7 @@ data. No firmware, disc or map data is included — you need your own dumps.
 | QEMU machine | Head unit | Tested disc set | Board model notes |
 |---|---|---|---|
 | `cup2006` | Volvo RTI MMM+ (CU-P2006) | 2017–18 Europe (`EU-3350-00`, Volvo 32214046) | — |
-| `cup28` | Volvo VNS | North America Western (`NA_0900_06A_WESTERN`) | [docs/board-cup28.md](docs/board-cup28.md) |
+| `cup28` | Volvo VNS | North America Western (`NA_0900_06A_WESTERN`); Europe 2014, disc C (`EU_2700_00C`) | [docs/board-cup28.md](docs/board-cup28.md) |
 
 Each machine models its board's hardware at the register and interrupt level
 and runs the disc's own Windows CE kernel, drivers and navigation application.
@@ -72,7 +72,8 @@ CUP28_DISC="/path/to/Disc A - Western.iso" make boot MODEL=cup28
 ```
 
 The macOS window is resizable and uses CoreAudio. The first run of a new unit
-takes about 15 s longer than later ones: the launcher powers the unit on once,
+takes longer than later ones — about 15 s on a North American disc, up to a
+minute on a European one — because the launcher powers the unit on once,
 headless, and lets it write the flash it sets itself up in
 (`first-power-on.log` in the unit directory, and see "Unit state" below). The
 window then opens on a unit that is already the car its map disc belongs to:
@@ -109,9 +110,10 @@ boot: it writes its flash there, and that boot is the only one that cannot yet
 apply the language the car announces (it logs `VPL_DataManager SetLangError`
 three times and keeps its factory default). `boot` spends that boot headless,
 so the first session a window opens on is already set up; the log is
-`first-power-on.log` in the unit directory and the power-on takes about 15 s
-(it ends once the guest's flash has been left alone for 10 s, so it is never
-cut short mid-write).
+`first-power-on.log` in the unit directory. The power-on takes about 15 s on a
+North American disc and up to a minute on a European one, and it ends once the
+guest's flash has been left alone for 10 s, so it is never cut short
+mid-write.
 
 ### Market and language
 
@@ -175,8 +177,9 @@ CSV format and what each column drives, and
   unverified.
 - **No snapshots or reset**: the board devices have no saved state, so `savevm`
   and migration are refused; a reset powers the unit off (start it again).
-- Tested with the North America Western disc set only; other disc editions and
-  the M-loader update process are out of scope.
+- Tested with the North America Western set (`NA_0900_06A_WESTERN`) and the
+  2014 Europe set's disc C (`EU_2700_00C`); other disc editions and the
+  M-loader update process are out of scope.
 
 ## CU-P2006 (Volvo RTI MMM+)
 

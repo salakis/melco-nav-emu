@@ -234,15 +234,35 @@ def test_new_unit_gets_one_setup_boot(tmp_path, monkeypatch):
     flash[cup28.FIRMWARE_OFFSET:cup28.FIRMWARE_OFFSET + firmware.stat().st_size] = \
         firmware.read_bytes()
     (unit / "flash.bin").write_bytes(flash)
-    assert cup28.flash_written(unit) is False
+    assert cup28.flash_written(unit, firmware) is False
     # A guest write after the image settles the unit: no second setup boot.
     flash[-1] = 0
     (unit / "flash.bin").write_bytes(flash)
-    assert cup28.flash_written(unit) is True
+    assert cup28.flash_written(unit, firmware) is True
     calls.clear()
     cli.main(["boot", "--model", "cup28", "--disc", str(disc), "--unit",
               str(unit), "--qemu", str(qemu), "--display", "none"])
     assert calls == []
+
+
+def test_flash_check_is_told_which_firmware_booted(tmp_path):
+    """A unit directory keeps one firmware image per disc set, so the check
+    for "has the guest written its flash" must be given the image that is in
+    it: with two, it cannot guess and says nothing has been written."""
+    unit = tmp_path / "unit"
+    unit.mkdir()
+    na, eu = unit / "nk-na.nb0", unit / "nk-eu.nb0"
+    na.write_bytes(b"\x00" * 4096)
+    eu.write_bytes(b"\x01" * 8192)
+    flash = bytearray(b"\xff" * 0x100000)
+    flash[cup28.FIRMWARE_OFFSET:cup28.FIRMWARE_OFFSET + 8192] = b"\x01" * 8192
+    (unit / "flash.bin").write_bytes(flash)
+    assert cup28.flash_written(unit) is False        # two images: no guess
+    assert cup28.flash_written(unit, eu) is False    # nothing after the image
+    flash[-1] = 0                                    # the guest wrote
+    (unit / "flash.bin").write_bytes(flash)
+    assert cup28.flash_written(unit, eu) is True
+    assert cup28.flash_written(unit) is False
 
 
 def test_shipped_scenarios_match_the_cup28_track_format():

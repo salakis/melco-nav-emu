@@ -134,20 +134,21 @@ POLL_S = 1.0
 
 
 def unit_firmware(unit: Path) -> Optional[Path]:
-    """The firmware image the unit's flash was programmed with."""
+    """The firmware image the unit's flash holds, when there is only one (a
+    unit directory used with two disc sets keeps one image per set)."""
     found = sorted(Path(unit).glob("nk-*.nb0"))
     return found[0] if len(found) == 1 else None
 
 
-def guest_flash(unit: Path) -> Optional[bytes]:
+def guest_flash(unit: Path, firmware: Optional[Path]) -> Optional[bytes]:
     """What the guest has put in the unit's flash, or None when it has written
     nothing yet.
 
     The machine programs the firmware image into an erased chip, so the region
     after that image is the guest's own: a unit whose flash holds anything
     there has been powered on before."""
-    unit = Path(unit)
-    flash, firmware = unit / "flash.bin", unit_firmware(unit)
+    unit, firmware = Path(unit), (Path(firmware) if firmware else None)
+    flash = unit / "flash.bin"
     if not flash.is_file() or firmware is None:
         return None
     try:
@@ -161,15 +162,16 @@ def guest_flash(unit: Path) -> Optional[bytes]:
     return None if tail.count(0xff) == len(tail) else tail
 
 
-def flash_written(unit: Path) -> bool:
+def flash_written(unit: Path, firmware: Optional[Path] = None) -> bool:
     """Has the guest written its own data into the unit's flash yet?"""
-    return guest_flash(unit) is not None
+    return guest_flash(unit, firmware or unit_firmware(unit)) is not None
 
 
 def first_power_on(unit: Path, media: dict,
                    timeout: int = FIRST_POWER_ON_S) -> bool:
     """Power a new unit on once, headless, until the guest has finished
-    writing its flash, then switch it off.  Takes ~15 s, once per unit.
+    writing its flash, then switch it off.  Once per unit: about 15 s on the
+    North American disc, up to a minute on a European one.
 
     A unit's first boot is the one where the guest builds the files it keeps
     in flash, and it cannot apply the language it is told over MOST until
@@ -199,7 +201,7 @@ def first_power_on(unit: Path, media: dict,
     try:
         while time.monotonic() < deadline:
             time.sleep(POLL_S)
-            written = guest_flash(unit)
+            written = guest_flash(unit, media["firmware"])
             now = time.monotonic()
             if written is None or written != last:
                 last, quiet_since = written, now
@@ -242,7 +244,9 @@ def prepare_unit(unit: Path, media: Optional[dict] = None) -> None:
     one headless power-on on a unit that has never been powered on."""
     unit = Path(unit)
     unit.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if media is None or (unit / POWERED_ON).exists() or flash_written(unit):
+    if media is None or (unit / POWERED_ON).exists():
+        return
+    if flash_written(unit, media["firmware"]):
         return
     first_power_on(unit, media)
 
