@@ -17,6 +17,7 @@
  */
 
 #include "cup2006-internal.h"
+#include "cup2006-socregs.h"
 
 
 /* QEMU 11 replaced cpu_get_phys_page_debug: same result, -1 if unmapped. */
@@ -269,17 +270,65 @@ uint32_t cup2006_guest_pc(void)
     return (cs && cs->cc->get_pc) ? (uint32_t)cs->cc->get_pc(cs) : 0;
 }
 
+/*
+ * Is this address one of the SH7785's own on-chip registers?  If so the
+ * manual (REJ09B0261-0100 section 31, machine/cup2006-socregs.h) says which
+ * one and what it reads at power-on, so an unmodelled access reports the
+ * register rather than a bare address, and a read that does not match the
+ * power-on value is called out: that is a register the board models as
+ * unmodelled but which the guest is actually relying on.
+ */
+static const Cup2006SocReg *cup2006_socreg_find(hwaddr addr)
+{
+    unsigned lo = 0, hi = ARRAY_SIZE(cup2006_socregs);
+
+    while (lo < hi) {
+        unsigned mid = (lo + hi) / 2;
+        const Cup2006SocReg *r = &cup2006_socregs[mid];
+
+        if (addr < r->addr) {
+            hi = mid;
+        } else if (addr >= r->addr + r->size) {
+            lo = mid + 1;
+        } else {
+            return r;
+        }
+    }
+    return NULL;
+}
+
 uint64_t cup2006_mmio_read(hwaddr addr, unsigned size)
 {
-    qemu_log_mask(LOG_GUEST_ERROR,
-                  "cup2006: mmio read  pc=0x%08" PRIx32
-                  " addr=0x%08" HWADDR_PRIx " size=%u value=0x0\n",
-                  cup2006_guest_pc(), addr, size);
-    return 0;
+    const Cup2006SocReg *r = cup2006_socreg_find(addr);
+
+    if (r) {
+        trace_cup2006_soc_unmodelled_read(r->name, (uint32_t)addr, size,
+                                          r->reset, r->undefined,
+                                          cup2006_guest_pc());
+    } else {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "cup2006: mmio read  pc=0x%08" PRIx32
+                      " addr=0x%08" HWADDR_PRIx " size=%u value=0x0\n",
+                      cup2006_guest_pc(), addr, size);
+    }
+    /*
+     * The manual's power-on value, not 0: a guest that reads a register this
+     * board does not model and gets the manual's reset value behaves as it
+     * would on a unit that has just left reset, instead of seeing one that is
+     * zero everywhere.
+     */
+    return r ? r->reset : 0;
 }
 
 void cup2006_mmio_write(hwaddr addr, uint64_t value, unsigned size)
 {
+    const Cup2006SocReg *r = cup2006_socreg_find(addr);
+
+    if (r) {
+        trace_cup2006_soc_unmodelled_write(r->name, (uint32_t)addr, size,
+                                           r->reset, cup2006_guest_pc());
+        return;
+    }
     qemu_log_mask(LOG_GUEST_ERROR,
                   "cup2006: mmio write pc=0x%08" PRIx32
                   " addr=0x%08" HWADDR_PRIx " size=%u value=0x%" PRIx64
