@@ -260,6 +260,11 @@ chip, `sensors.csv` for the car's wheel and gyro sensors on the same clock).
 - **Display.** The DU model implements the commands the tested firmware uses,
   plus one behaviour the SH7785 manual does not describe but the guest depends
   on: it raises INTEVT 0x780 with every DIER enable clear (STUB departure).
+- **EEPROM part number.** The About screen's `HW P/N` is the unit's own: the
+  driver reads words 56-59 of the sub-CPU EEPROM, five bytes of packed BCD and
+  a three-byte suffix. No factory label is known here, so the launcher lands
+  `0000000000 AA` in the unit's `eeprom.bin` (STUB); an erased part reads
+  0xFFFF and the screen shows `??????????ÿÿÿ`.
 - **DVD drive.** Only the commands the driver actually issues are modelled
   (sector reads, media-status polls, the command echo and the post-"Loading
   start" queries); the drive answers at once, its reply bytes are values

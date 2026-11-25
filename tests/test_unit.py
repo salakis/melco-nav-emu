@@ -132,3 +132,23 @@ def test_status_of_a_short_or_missing_store_is_none(tmp_path):
     data[cup2006.BKRAM_APM_AREA:cup2006.BKRAM_APM_AREA + 8] = cup2006.APM_DATE
     bkram.write_bytes(bytes(data))
     assert cup2006.bkram_dwl_sts(bkram) is None
+
+
+def test_prepare_lands_the_eeprom_part_number(tmp_path):
+    u = tmp_path / "u"
+    u.mkdir()
+    (u / unit.POWERED_ON).write_text("timed out\n")   # no power-on here
+    unit.prepare(u, "cup2006")
+    image = (u / "eeprom.bin").read_bytes()
+    assert len(image) == cup2006.EEPROM_BYTES
+    assert image[112:120] == bytes(5) + b" AA"
+    # Everything else stays as the part shipped: erased.
+    assert image[:112] == b"\xff" * 112 and image[120:] == b"\xff" * 8
+    # Idempotent, and it leaves the guest's own bytes (the config word the
+    # driver writes) alone.
+    image = bytearray(image)
+    image[0x17] = 0x0c
+    (u / "eeprom.bin").write_bytes(bytes(image))
+    unit.prepare(u, "cup2006")
+    after = (u / "eeprom.bin").read_bytes()
+    assert after == bytes(image)

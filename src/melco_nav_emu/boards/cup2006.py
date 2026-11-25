@@ -394,6 +394,33 @@ def bkram_dwl_sts(bkram):
     return _dwl_sts(bkram, BKRAM_APM_AREA)
 
 
+# The guest's About screen takes the unit's own part number from the onboard
+# EEPROM (the 93C46 on the sub-CPU link): five bytes of packed BCD for its ten
+# digits, then three ASCII bytes for the suffix, at word 56.  An erased part
+# reads 0xFFFF, which the screen renders as "??????????ÿÿÿ", so the unit is
+# given one.  No factory label is known here: the number below is a
+# placeholder, only this layout is real.
+EEPROM_BYTES = 128                             # 64 words, two bytes each
+EEPROM_PART_OFFSET = 112                       # word 56 of the 64-word part
+EEPROM_PART_NUMBER = bytes(5) + b" AA"         # "0000000000 AA"
+
+
+def seed_eeprom_part_number(unit: Path) -> None:
+    """Land the unit's part number in its EEPROM image, in the order the
+    driver reads it back in (machine/cup2006-subcpu.c: a word goes out low
+    byte first, and the eight bytes sit at 112-119 of eeprom.bin)."""
+    eeprom = Path(unit) / "eeprom.bin"
+    image = (bytearray(eeprom.read_bytes()) if eeprom.is_file()
+             else bytearray(b"\xff" * EEPROM_BYTES))
+    end = EEPROM_PART_OFFSET + len(EEPROM_PART_NUMBER)
+    if len(image) < end:
+        image.extend(b"\xff" * (end - len(image)))
+    if bytes(image[EEPROM_PART_OFFSET:end]) == EEPROM_PART_NUMBER:
+        return                                  # already landed
+    image[EEPROM_PART_OFFSET:end] = EEPROM_PART_NUMBER
+    eeprom.write_bytes(bytes(image))
+
+
 def prepare_unit(unit: Path) -> None:
     """Land the map-install record in the unit's guest-formatted APM areas
     (flash and battery RAM), powering a new unit on once headless first so
@@ -405,6 +432,7 @@ def prepare_unit(unit: Path) -> None:
     APM area by scripts/apm_record_seed.py.
     """
     unit = Path(unit)
+    seed_eeprom_part_number(unit)
     bkram = unit / "bkram.bin"
     if bkram_dwl_sts(bkram) is None and not (unit / POWERED_ON).exists():
         first_power_on(unit, hdd=unit_hdd(unit))

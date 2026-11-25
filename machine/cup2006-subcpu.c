@@ -74,10 +74,16 @@ static void cup2006_scif_rx_push(Cup2006MachineState *s, uint8_t byte)
 
 /* The onboard EEPROM is a Microwire 93C46, 64 x 16-bit words, on this SCIF
  * in clocked mode (SCSMR 0x80), bytes bit-reversed on the wire.
- * STUB: programming is instant, so DO reads ready at once. */
+ * STUB: programming is instant, so DO reads ready at once.
+ *
+ * A word goes out (and comes in) low byte first, as the driver frames it.
+ * Big-endian here returned every byte pair swapped: the About screen's HW
+ * part number, a packed-BCD block at word 56, could not show the value that
+ * had been written to the part. */
 /* Save the EEPROM image to <path>.tmp and rename it over <path> only when
  * complete, so an interrupted save never leaves an empty or short file
- * (which would load back as erased and lose the old contents). */
+ * (which would load back as erased and lose the old contents).  The file is
+ * two bytes per word, high byte first. */
 static void cup2006_eeprom_save(Cup2006MachineState *s)
 {
     uint8_t img[2 * CUP2006_EEPROM_WORDS];
@@ -170,8 +176,8 @@ static void cup2006_scif_tx_byte(Cup2006MachineState *s, uint8_t byte)
     switch (op) {
     case 2:                             /* READ: words from addr on */
         for (i = addr; i < CUP2006_EEPROM_WORDS; i++) {
-            cup2006_scif_rx_push(s, cup2006_scif_rev8(s->eeprom[i] >> 8));
             cup2006_scif_rx_push(s, cup2006_scif_rev8(s->eeprom[i] & 0xff));
+            cup2006_scif_rx_push(s, cup2006_scif_rev8(s->eeprom[i] >> 8));
         }
         if (s->scif_rx_byte < 0) {
             cup2006_scif_rx_arm(s);
@@ -179,8 +185,8 @@ static void cup2006_scif_tx_byte(Cup2006MachineState *s, uint8_t byte)
         break;
     case 1:                             /* WRITE */
         if (s->eeprom_ewen) {
-            s->eeprom[addr] = cup2006_scif_rev8(s->scif_tx[2]) << 8 |
-                              cup2006_scif_rev8(s->scif_tx[3]);
+            s->eeprom[addr] = cup2006_scif_rev8(s->scif_tx[3]) << 8 |
+                              cup2006_scif_rev8(s->scif_tx[2]);
             cup2006_eeprom_save(s);
         }
         break;
@@ -198,8 +204,8 @@ static void cup2006_scif_tx_byte(Cup2006MachineState *s, uint8_t byte)
         case 1:                         /* WRAL */
             if (s->eeprom_ewen) {
                 for (i = 0; i < CUP2006_EEPROM_WORDS; i++) {
-                    s->eeprom[i] = cup2006_scif_rev8(s->scif_tx[2]) << 8 |
-                                   cup2006_scif_rev8(s->scif_tx[3]);
+                    s->eeprom[i] = cup2006_scif_rev8(s->scif_tx[3]) << 8 |
+                                   cup2006_scif_rev8(s->scif_tx[2]);
                 }
                 cup2006_eeprom_save(s);
             }
