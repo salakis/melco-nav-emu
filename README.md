@@ -33,7 +33,10 @@ the last entry of the system settings list (opened with the right arrow).
 | about | ![CU-P2006 about screen](screenshots/cup2006-about.png) | ![CUP28 about screen](screenshots/cup28-about.png) |
 
 CUP28's HW version field reads back as unknown characters, because the machine
-does not model it.
+does not model the EEPROM device behind the `0x07800000` controller: the
+kernel's read never reports completion, so the unit's identity comes back
+erased (ten `?` and three stray `0xFF` bytes). Seeding the windows the guest
+reads does not change the field.
 
 ## Requirements and building
 
