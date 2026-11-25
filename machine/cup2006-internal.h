@@ -677,6 +677,7 @@ struct Cup2006MachineState {
     /* list executor counters (pixels written from guest commands). */
     uint64_t dg_blits;
     uint64_t dg_skipped;
+    uint64_t dg_bounds;
     uint64_t dg_work_ops;           /* work-plane pixel ops in this job */
     uint64_t dg_frame_ops;          /* frame-plane pixel ops in this job */
     int64_t draw_t0_ms;                /* 2DG log timestamps */

@@ -72,6 +72,46 @@ static void cup2006_dg_skip(Cup2006MachineState *s, uint32_t pc,
 }
 
 /*
+ * A drawing job that a defensive bound rejected: the packet is understood and
+ * none of the engine's behaviour is missing, so this is counted apart from
+ * dg_skipped (which is only "the model has no implementation of this").
+ */
+static void cup2006_dg_bounds(Cup2006MachineState *s, uint32_t pc,
+                              const char *why, uint32_t word)
+{
+    s->dg_bounds++;
+    trace_cup2006_2dg_dg_bounds_pc_word(pc, word, why);
+}
+
+/*
+ * ROP3 (SH7764 23.2.3(7): the code names the operation over three surfaces,
+ * pattern P, source S and destination D). Bit (P << 2 | S << 1 | D) of the
+ * code is the operation's result for that combination, the Win32 ternary
+ * encoding, so 0xCC is S (source copy), 0x00 is 0, 0xFF is 1, 0x55 is NOT D
+ * and 0x5A is P XOR D.
+ *
+ * The tested firmware leaves P and S equal: a fill (BITBLT 0xA0) sends one
+ * colour as both, a copy (0xA2) sends the source pixel as both, and the
+ * two-colour expand (BITBLTB) sends its expanded colour as both. That makes
+ * every P-and-S-only operation exact and leaves the pattern-only ones
+ * (0xF0 PATCOPY and friends) drawn with the source colour; the distinction
+ * needs a pattern register, which is not modelled yet.
+ */
+static uint16_t cup2006_dg_rop3(unsigned rop, uint16_t p, uint16_t s,
+                                uint16_t d)
+{
+    uint16_t out = 0;
+    int bit;
+
+    for (bit = 0; bit < 16; bit++) {
+        unsigned index = ((p >> bit) & 1) << 2 | ((s >> bit) & 1) << 1 |
+                         ((d >> bit) & 1);
+        out = (out & ~(1u << bit)) | (((rop >> index) & 1u) << bit);
+    }
+    return out;
+}
+
+/*
  * Execute one BITBLT packet. lx/ly are the current LCOFS local offset.
  * Returns the number of pixels written.
  */
@@ -92,6 +132,7 @@ static uint64_t cup2006_dg_bitblt(Cup2006MachineState *s, uint32_t pc,
     int nx = lw + rw + 1, ny = th + bh + 1;
     int x, y, xmin, ymin, xmax, ymax;
     uint32_t sc, dstrr, stcr = 0, stcr_mask = 0xffff;
+    uint32_t rop = f[0] & 0xff;
     bool ss = (mode & CUP2006_DG_MODE_SS) != 0;
     bool strans = (mode & CUP2006_DG_MODE_STRANS) != 0;
     uint32_t src_pa = 0, fill = 0;
@@ -99,10 +140,6 @@ static uint64_t cup2006_dg_bitblt(Cup2006MachineState *s, uint32_t pc,
     int txs = 0, tys = 0;
     uint64_t written = 0;
 
-    if (f[0] != CUP2006_DG_ROP_COPY) {
-        cup2006_dg_skip(s, pc, "ROP not modelled (only 0xCC)", w0);
-        return 0;
-    }
     if (mode & ~allowed) {
         cup2006_dg_skip(s, pc, "draw-mode bits not modelled", w0);
         return 0;
@@ -116,7 +153,7 @@ static uint64_t cup2006_dg_bitblt(Cup2006MachineState *s, uint32_t pc,
         return 0;
     }
     if (nx <= 0 || ny <= 0) {
-        cup2006_dg_skip(s, pc, "empty destination rectangle", w0);
+        cup2006_dg_bounds(s, pc, "empty destination rectangle", w0);
         return 0;
     }
 
@@ -158,7 +195,7 @@ static uint64_t cup2006_dg_bitblt(Cup2006MachineState *s, uint32_t pc,
             src_pa = f[1];
         }
         if (src_pitch <= 0) {
-            cup2006_dg_skip(s, pc, "zero source pitch", w0);
+            cup2006_dg_bounds(s, pc, "zero source pitch", w0);
             return 0;
         }
         if (strans) {
@@ -184,7 +221,7 @@ static uint64_t cup2006_dg_bitblt(Cup2006MachineState *s, uint32_t pc,
                                              (uint32_t)(x - xmin) * 2, 2);
 
             if (!dp) {
-                cup2006_dg_skip(s, pc, "destination outside RAM", w0);
+                cup2006_dg_bounds(s, pc, "destination outside RAM", w0);
                 return written;
             }
             if (op == 0xa0) {
@@ -196,13 +233,16 @@ static uint64_t cup2006_dg_bitblt(Cup2006MachineState *s, uint32_t pc,
                 uint8_t *sp = cup2006_dg_ram_ptr(s, spa, 2);
 
                 if (!sp) {
-                    cup2006_dg_skip(s, pc, "source outside RAM", w0);
+                    cup2006_dg_bounds(s, pc, "source outside RAM", w0);
                     return written;
                 }
                 val = lduw_le_p(sp);
                 if (strans && (val & stcr_mask) == stcr) {
                     continue;
                 }
+            }
+            if (rop != CUP2006_DG_ROP_COPY) {
+                val = cup2006_dg_rop3(rop, val, val, lduw_le_p(dp));
             }
             stw_le_p(dp, val);
             written++;
@@ -483,7 +523,7 @@ static uint64_t cup2006_dg_polygon4c(Cup2006MachineState *s, uint32_t pc,
                     s->dg_reg[CUP2006_DG_DEST >> 2] +
                     ((uint32_t)y * dstrr + (uint32_t)x) * 2, 2);
                 if (!dp) {
-                    cup2006_dg_skip(s, pc, "destination outside RAM", w0);
+                    cup2006_dg_bounds(s, pc, "destination outside RAM", w0);
                     return written;
                 }
                 if (alpha) {
@@ -639,7 +679,7 @@ static uint64_t cup2006_dg_polygon4ab(Cup2006MachineState *s, uint32_t pc,
                         (uint32_t)(scol >> 3), 1);
 
                     if (!sb) {
-                        cup2006_dg_skip(s, pc, "POLYGON4B source outside RAM",
+                        cup2006_dg_bounds(s, pc, "POLYGON4B source outside RAM",
                                         w0);
                         return written;
                     }
@@ -650,7 +690,7 @@ static uint64_t cup2006_dg_polygon4ab(Cup2006MachineState *s, uint32_t pc,
                                 (uint32_t)scol) * 2, 2);
 
                     if (!sp) {
-                        cup2006_dg_skip(s, pc, "POLYGON4A source outside RAM",
+                        cup2006_dg_bounds(s, pc, "POLYGON4A source outside RAM",
                                         w0);
                         return written;
                     }
@@ -660,7 +700,7 @@ static uint64_t cup2006_dg_polygon4ab(Cup2006MachineState *s, uint32_t pc,
                     s->dg_reg[CUP2006_DG_DEST >> 2] +
                     ((uint32_t)y * dstrr + (uint32_t)x) * 2, 2);
                 if (!dp) {
-                    cup2006_dg_skip(s, pc, "destination outside RAM", w0);
+                    cup2006_dg_bounds(s, pc, "destination outside RAM", w0);
                     return written;
                 }
                 if (strans && (val & stcr_mask) == stcr) {
@@ -751,7 +791,7 @@ static uint64_t cup2006_dg_linec(Cup2006MachineState *s, uint32_t pc,
         }
 
         if (!cup2006_dg_fetch(s, vaddr + 4 * i, &v)) {
-            cup2006_dg_skip(s, pc, "LINEC vertex outside RAM", w0);
+            cup2006_dg_bounds(s, pc, "LINEC vertex outside RAM", w0);
             break;
         }
         x = (int16_t)(v >> 16) + lx;
@@ -985,7 +1025,7 @@ static void cup2006_dg_ftrapc(Cup2006MachineState *s, uint32_t pc,
         int x1, y1;
 
         if (!cup2006_dg_fetch(s, vaddr + 4 * i, &v)) {
-            cup2006_dg_skip(s, pc, "FTRAPC vertex outside RAM", w0);
+            cup2006_dg_bounds(s, pc, "FTRAPC vertex outside RAM", w0);
             return;
         }
         x1 = (int16_t)(v >> 16) + lx;
@@ -1053,7 +1093,7 @@ static void cup2006_dg_linewc(Cup2006MachineState *s, uint32_t pc,
         int x1, y1;
 
         if (!cup2006_dg_fetch(s, vaddr + 4 * i, &v)) {
-            cup2006_dg_skip(s, pc, "LINEWC vertex outside RAM", w0);
+            cup2006_dg_bounds(s, pc, "LINEWC vertex outside RAM", w0);
             return;
         }
         x1 = (int16_t)(v >> 16) + lx;
@@ -1093,13 +1133,10 @@ static uint64_t cup2006_dg_bitbltb(Cup2006MachineState *s, uint32_t pc,
     int dx0 = bxc + lx - lw, dy0 = byc + ly - th;
     int x, y, xmin = 0, ymin = 0, xmax, ymax, rowbytes;
     uint32_t dstrr, sc, stcr = 0, stcr_mask = 0xffff;
+    uint32_t rop = f[0] & 0xff;
     bool strans = (mode & CUP2006_DG_MODE_STRANS) != 0;
     uint64_t written = 0;
 
-    if ((f[0] & 0xff) != CUP2006_DG_ROP_COPY) {
-        cup2006_dg_skip(s, pc, "BITBLTB ROP not modelled (only 0xCC)", w0);
-        return 0;
-    }
     if (mode & ~allowed) {
         cup2006_dg_skip(s, pc, "BITBLTB draw-mode bits not modelled", w0);
         return 0;
@@ -1149,7 +1186,7 @@ static uint64_t cup2006_dg_bitbltb(Cup2006MachineState *s, uint32_t pc,
                                          rowbytes);
 
         if (!sb) {
-            cup2006_dg_skip(s, pc, "BITBLTB source outside RAM", w0);
+            cup2006_dg_bounds(s, pc, "BITBLTB source outside RAM", w0);
             return written;
         }
         for (x = xmin; x <= xmax; x++) {
@@ -1160,11 +1197,14 @@ static uint64_t cup2006_dg_bitbltb(Cup2006MachineState *s, uint32_t pc,
                 ((uint32_t)y * dstrr + (uint32_t)x) * 2, 2);
 
             if (!dp) {
-                cup2006_dg_skip(s, pc, "destination outside RAM", w0);
+                cup2006_dg_bounds(s, pc, "destination outside RAM", w0);
                 return written;
             }
             if (strans && (val & stcr_mask) == stcr) {
                 continue;
+            }
+            if (rop != CUP2006_DG_ROP_COPY) {
+                val = cup2006_dg_rop3(rop, val, val, lduw_le_p(dp));
             }
             stw_le_p(dp, val);
             written++;
@@ -1181,6 +1221,7 @@ static void cup2006_dg_execute(Cup2006MachineState *s)
     unsigned sp = 0, packets = 0;
     uint64_t pixels = 0;
     uint64_t blits0 = s->dg_blits, skip0 = s->dg_skipped;
+    uint64_t bound0 = s->dg_bounds;
     int lx = 0, ly = 0;
     unsigned steps = 0;
 
@@ -1429,7 +1470,7 @@ static void cup2006_dg_execute(Cup2006MachineState *s)
             break;
         }
     }
-    trace_cup2006_2dg_dg_raster_job_st(s->dg_jobs, s->dg_reg[CUP2006_DG_LIST >> 2], steps, packets, s->dg_blits - blits0, pixels, s->dg_skipped - skip0, s->dg_reg[CUP2006_DG_DEST >> 2]);
+    trace_cup2006_2dg_dg_raster_job_st(s->dg_jobs, s->dg_reg[CUP2006_DG_LIST >> 2], steps, packets, s->dg_blits - blits0, pixels, s->dg_skipped - skip0, s->dg_bounds - bound0, s->dg_reg[CUP2006_DG_DEST >> 2]);
 }
 
 /*
