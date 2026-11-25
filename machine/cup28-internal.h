@@ -79,7 +79,7 @@ struct Cup28MachineState {
     MachineState parent_obj;
 
     bool powered;
-    char *dvdimage, *drfimage, *sramsave, *gpstrack;
+    char *dvdimage, *drfimage, *sramsave, *eeprom, *gpstrack;
     Error *migration_blocker;
     MemoryRegion ram, drf_alias_regs;
     MelcoAmdFlash *drf;

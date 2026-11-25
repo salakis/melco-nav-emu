@@ -70,8 +70,8 @@ def _escape(value: object) -> str:
 
 
 def prepare_unit(unit: Path) -> None:
-    """The CUP28 machine creates its flash/SRAM files itself; just make the
-    unit directory."""
+    """The CUP28 machine creates its flash/SRAM/EEPROM files itself; just make
+    the unit directory."""
     Path(unit).mkdir(mode=0o700, parents=True, exist_ok=True)
 
 
@@ -106,6 +106,7 @@ def qemu_argv(media: dict, *, display: str, serial=None, extra=(),
         "dvdimage": media["disc"],
         "drfimage": media["unit"] / "flash.bin",
         "sramsave": media["unit"] / "sram.bin",
+        "eeprom": media["unit"] / "eeprom.bin",
     }
     if media.get("track") is not None:
         properties["gpstrack"] = media["track"]

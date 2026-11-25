@@ -234,9 +234,8 @@ static void cup28_storage_init(Cup28MachineState *s, MemoryRegion *mem,
                                         &s->p28_eeprom_regs, 3);
     cup28_bksram_init(s);
     memory_region_add_subregion_overlap(mem, 0x12000000, &s->p28_bksram, 1);
-    memory_region_init_ram(&s->p28_bkeeprom, NULL, "cup28-backup-eeprom",
-                           MiB, &error_fatal);
-    memset(memory_region_get_ram_ptr(&s->p28_bkeeprom), 0xff, MiB);
+    melco_nvram_init(&s->p28_bkeeprom, OBJECT(s), "cup28-backup-eeprom",
+                     (s->eeprom && *s->eeprom) ? s->eeprom : NULL, MiB, 0xff);
     memory_region_add_subregion_overlap(mem, 0x18000000, &s->p28_bkeeprom, 1);
 
     /* STUB: the FLR driver sees a blank 256 KiB read/write window. */
@@ -335,6 +334,7 @@ static void cup28_init(MachineState *machine)
 CUP28_PATH_PROPERTY(dvdimage)
 CUP28_PATH_PROPERTY(drfimage)
 CUP28_PATH_PROPERTY(sramsave)
+CUP28_PATH_PROPERTY(eeprom)
 CUP28_PATH_PROPERTY(gpstrack)
 
 static void cup28_finalize(Object *obj)
@@ -344,6 +344,7 @@ static void cup28_finalize(Object *obj)
     g_free(s->dvdimage);
     g_free(s->drfimage);
     g_free(s->sramsave);
+    g_free(s->eeprom);
     g_free(s->gpstrack);
     if (s->most_input) {
         qemu_input_handler_unregister(s->most_input);
@@ -372,6 +373,10 @@ static void cup28_class_init(ObjectClass *oc, const void *data)
     object_class_property_add_str(oc, "sramsave", cup28_get_sramsave,
                                   cup28_set_sramsave);
     object_class_property_set_description(oc, "sramsave", "1 MiB backup SRAM file");
+    object_class_property_add_str(oc, "eeprom", cup28_get_eeprom,
+                                  cup28_set_eeprom);
+    object_class_property_set_description(oc, "eeprom",
+                                          "1 MiB backup EEPROM file");
     object_class_property_add_str(oc, "gpstrack", cup28_get_gpstrack,
                                   cup28_set_gpstrack);
     object_class_property_set_description(oc, "gpstrack", "GPS and sensor track CSV");

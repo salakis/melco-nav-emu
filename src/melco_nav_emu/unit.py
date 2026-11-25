@@ -7,7 +7,8 @@
     bkram.bin   1 MiB battery RAM (CU-P2006 production board: the guest's
                 live backup areas, including the APM map-install record)
     sram.bin    64 KiB battery SRAM (GPS backup)
-    eeprom.bin  128 B onboard EEPROM
+    eeprom.bin  onboard EEPROM (128 B CU-P2006, 1 MiB CUP28 backup
+                EEPROM)
     hdd.img     factory units only: the unit's own disk
 
     python -m melco_nav_emu.unit new DIR       # create/prepare a unit

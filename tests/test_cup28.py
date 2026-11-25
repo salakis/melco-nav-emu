@@ -100,6 +100,7 @@ def test_cli_boot_uses_persistent_unit_and_unmodified_firmware(tmp_path, monkeyp
     machine = command[command.index("-M") + 1]
     assert machine == (f"cup28,dvdimage={str(disc).replace(',', ',,')},"
                        f"drfimage={unit / 'flash.bin'},sramsave={unit / 'sram.bin'},"
+                       f"eeprom={unit / 'eeprom.bin'},"
                        "audiodev=nav")
     assert command[command.index("-audiodev") + 1] == "coreaudio,out.buffer-count=32,id=nav"
     kernel = Path(command[command.index("-kernel") + 1])
