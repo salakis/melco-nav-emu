@@ -50,6 +50,15 @@ follows the model:
 bits 16-23 are the input FIFO's fill. The line is level-sensitive: up while
 `+0x130 & 0x8000` and `+0x12C & +0x130`.
 
+The line the latch model drives is not this one. It reads `+0x130` the other
+way round, as a mask, and that sense is load-bearing: the map screen depends
+on the phantom raise it produces at 71 s, because the guest's 0x900 handler is
+what starts the display pipeline. With `mbx3d=on` the glue recomputes the
+model's level through the same rule, and for the same reason — handing the
+model's own level to the controller instead stops the 3D map. `cup2006-du.c`
+has the measurement and what would have to be modelled before either can be
+corrected.
+
 ## Watching it
 
 ```

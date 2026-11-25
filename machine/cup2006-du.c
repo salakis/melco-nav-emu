@@ -41,10 +41,28 @@ void cup2006_mbx_note(Cup2006MachineState *s, hwaddr phys,
 /*
  * MBX interrupt line: INTEVT 0x900 is raised on an enabled 0 -> 1 status
  * transition in +0x12C and released when the guest's +0x134 ack clears it.
+ *
+ * STUB departure: +0x130 is read here as a MASK, the opposite of the enable
+ * that cup2006-mbx.c, machine/mbx/core.c and the driver itself use
+ * (+0x130 = 0xffffffff before each +0x838 arm, 0xffffffbf after acking bit
+ * 6).  Read as an enable, the boot is instruction-identical to 71.29 s and
+ * then stops on the disclaimer: the only 0x900 interrupt the latch model can
+ * raise is its instant completion at driver-init time (t=1.5 s), which the
+ * driver answers by polling.
+ *
+ * It is not the MBX that needs the line.  The boot that reaches the map gets
+ * there through a phantom raise: at 71.29 s the driver writes 0x7fbb,
+ * disabling bits 2 and 6, a mask reads that as enabling them, and the code
+ * the resulting interrupt unblocks starts the first +0x680 render.  So 0x900
+ * is advancing the display pipeline, and whatever event the guest is waiting
+ * for there, this model does not deliver it; the sense stays until it does.
+ * Measured on both paths: with the enable sense the latch path stops on the
+ * disclaimer and mbx3d=1 never reaches the 3D map, against a map screen and
+ * a 3D destination screen as it stands.
  */
 static uint32_t cup2006_mbx_active_status(Cup2006MachineState *s)
 {
-    /* +0x130 is an interrupt MASK (1 = masked), not an enable. */
+    /* STUB: a mask, not the enable the hardware has - see above. */
     uint32_t mask = s->mbx_window[CUP2006_MBX_ENABLE >> 2] & 0xffff;
 
     return s->mbx_status & ~mask & 0xffff & ~CUP2006_MBX_ST_POLLED;
