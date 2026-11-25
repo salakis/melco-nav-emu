@@ -614,7 +614,7 @@ def prepare(unit, args=None) -> dict:
     return {"unit": unit, "hdd": hdd}
 
 
-def qemu_argv(media: dict, *, display="cocoa,zoom-to-fit=on",
+def qemu_argv(media: dict, *, display: str,
               serial=("stdio",), extra=(), qmp=None) -> list:
     """The QEMU command line for a unit prepared by prepare()."""
     argv = _argv(media["unit"], display, serial, extra, media["hdd"])

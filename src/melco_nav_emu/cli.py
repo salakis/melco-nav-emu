@@ -128,6 +128,12 @@ def cmd_screenshot(args: argparse.Namespace) -> int:
     return 0
 
 
+def default_display() -> str:
+    """QEMU's display backend when the caller names none: cocoa exists only in
+    a macOS build, so every other host gets sdl."""
+    return "cocoa,zoom-to-fit=on" if sys.platform == "darwin" else "sdl"
+
+
 def cmd_boot(args: argparse.Namespace) -> int:
     board = boards.get(args.model)
     # Environment fallbacks, in this order: MELCO_DISC/MELCO_UNIT, then the
@@ -143,8 +149,7 @@ def cmd_boot(args: argparse.Namespace) -> int:
     if args.unit is not None:
         args.unit = Path(args.unit)
     if args.display is None:
-        args.display = os.environ.get("DISPLAY_BACKEND") or (
-            "cocoa,zoom-to-fit=on" if sys.platform == "darwin" else "sdl")
+        args.display = os.environ.get("DISPLAY_BACKEND") or default_display()
     if args.model == "cup2006":
         if args.track or args.audio is not None:
             raise ImageFormatError(
@@ -174,6 +179,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     # (boards registry + this CLI); this launches a raw machine for experiments.
     # Disks and discs attach through machine properties (hddimage=,
     # dvdimage=), not -drive/-cdrom: the sh4 machine has no IDE bus.
+    if args.display is None:
+        args.display = default_display()
     cmd: List[str] = [
         str(qemu),
         "-M",
@@ -284,7 +291,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="machine properties, e.g. 'cup2006,hddimage=...,dvdimage=...'")
     p.add_argument("--memory", default="256M")
     p.add_argument("--kernel", help="flattened NK image")
-    p.add_argument("--display", default="cocoa")
+    p.add_argument("--display", default=None)
     p.add_argument("--serial", default="stdio",
                    help="first serial port (SH7750 SCI), default stdio")
     p.add_argument("--serial2", default=None,

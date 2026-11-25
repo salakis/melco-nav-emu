@@ -2,11 +2,12 @@
 # Copyright (c) 2026 melco-nav-emu contributors
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
 
-from melco_nav_emu import cli
+from melco_nav_emu import boards, cli
 
 
 def _fake_qemu(tmp_path: Path) -> Path:
@@ -139,3 +140,27 @@ def test_screenshot_resolves_relative_output(tmp_path: Path, monkeypatch) -> Non
     monkeypatch.chdir(tmp_path)
     assert cli.main(["screenshot", "unix:/tmp/q.sock", "shot.png"]) == 0
     assert sent["file"] == str(tmp_path / "shot.png")
+
+
+def test_default_display_follows_the_platform(monkeypatch) -> None:
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert cli.default_display() == "cocoa,zoom-to-fit=on"
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert cli.default_display() == "sdl"
+
+
+def test_run_dry_run_does_not_ask_for_cocoa_on_linux(
+        tmp_path: Path, capsys, monkeypatch) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert cli.main(["run", "--qemu", str(_fake_qemu(tmp_path)),
+                     "--kernel", str(tmp_path / "nk.nb0"),
+                     "--dry-run"]) == 0
+    assert "-display sdl" in capsys.readouterr().out
+
+
+def test_boards_require_a_display() -> None:
+    # A caller that forgets the backend must not inherit one: cocoa is
+    # macOS-only, and both boards' qemu_argv() is reached from Linux too.
+    for board in (boards.cup2006, boards.cup28):
+        with pytest.raises(TypeError):
+            board.qemu_argv({})

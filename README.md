@@ -39,7 +39,10 @@ does not model it.
 
 - macOS with the Xcode command line tools, and Homebrew `glib`, `pixman` and
   `pkg-config` (QEMU's build dependencies). Linux builds the same way but is
-  untested.
+  untested: it wants the same three packages, plus SDL2 for the default window
+  backend and a working `python3 -m venv` for the `ninja` that
+  `scripts/qemu.sh` installs. Debian and Ubuntu:
+  `libglib2.0-dev libpixman-1-dev libsdl2-dev pkg-config python3-venv`.
 - Python 3.9 or later.
 - Disk space: **CU-P2006** needs about **32 GB free** — the disc ISOs (~9.5 GB)
   plus the virtual HDD (~22 GB, built once from the discs, streamed straight
