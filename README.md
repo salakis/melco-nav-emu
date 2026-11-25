@@ -32,15 +32,10 @@ the last entry of the system settings list (opened with the right arrow).
 | system settings | ![CU-P2006 system settings](screenshots/cup2006-settings.png) | ![CUP28 system settings](screenshots/cup28-settings.png) |
 | about | ![CU-P2006 about screen](screenshots/cup2006-about.png) | ![CUP28 about screen](screenshots/cup28-about.png) |
 
-CUP28's HW version field reads back as unknown characters (ten `?` and three
-stray `0xFF` bytes). The `0x07800000` window is not an EEPROM transfer engine:
-its `+0x010` block is the A/D sample service, and tracing every access over a
-whole boot shows nothing reads the window's registers for identity. The unit's
-EEPROM store is the backup window at physical `0x18000000`, which this machine
-keeps in the unit's `eeprom.bin`: the guest formats it itself and holds its
-power-on counters there. The About field is not served from it: a valid part
-number written into every slot of that image leaves the field unchanged, so
-where the field comes from is still open.
+CUP28's About screen shows the eight bytes at offset `0x7ff0` of the unit's
+backup EEPROM as the HW version: five packed-BCD digits and a three-character
+suffix. The machine fills an erased identity with the placeholder
+`0000000000 AA` and keeps whatever a unit already holds.
 
 ## Requirements and building
 
@@ -99,8 +94,9 @@ session).
 
 ### Unit state
 
-The launcher stores the unit's flash and battery-backed SRAM in `build/cup28`
-(`flash.bin`, `sram.bin`) plus the extracted firmware image `nk-<sha256>.nb0`.
+The launcher stores the unit's flash, battery-backed SRAM, and backup EEPROM in
+`build/cup28` (`flash.bin`, `sram.bin`, `eeprom.bin`) alongside the extracted
+firmware image `nk-<sha256>.nb0`.
 Set `CUP28_UNIT` to a different directory for a separate unit; `rm -rf` that
 directory for a new one.
 

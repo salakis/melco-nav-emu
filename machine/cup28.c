@@ -11,6 +11,7 @@
 #define CUP28_FLASH_LOG_MAX 256
 #define CUP28_FLASH_SECTOR (256 * KiB)
 #define CUP28_FIRMWARE_OFFSET 0x80000
+#define CUP28_HW_VERSION_OFFSET 0x7ff0
 
 uint64_t cup28_register_read(const uint8_t *regs, hwaddr addr,
                                     unsigned size)
@@ -182,6 +183,28 @@ struct intc_source *cup28_intc_source(SuperHCPU *cpu, unsigned intevt)
     return NULL;
 }
 
+static void cup28_bkeeprom_init(Cup28MachineState *s)
+{
+    static const uint8_t erased[] = {
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    };
+    /* STUB: a factory unit carries its identity in the last eight bytes of
+     * eep.dll's EEPROM window, five packed-BCD digits and a three-byte
+     * suffix. An erased chip has none, so seed a placeholder. */
+    static const uint8_t placeholder[] = {
+        0x00, 0x00, 0x00, 0x00, 0x00, ' ', 'A', 'A',
+    };
+    uint8_t *version;
+
+    melco_nvram_init(&s->p28_bkeeprom, OBJECT(s), "cup28-backup-eeprom",
+                     s->eeprom, MiB, 0xff);
+    version = (uint8_t *)memory_region_get_ram_ptr(&s->p28_bkeeprom) +
+              CUP28_HW_VERSION_OFFSET;
+    if (memcmp(version, erased, sizeof(erased)) == 0) {
+        memcpy(version, placeholder, sizeof(placeholder));
+    }
+}
+
 static void cup28_storage_init(Cup28MachineState *s, MemoryRegion *mem,
                                SuperHCPU *cpu)
 {
@@ -234,8 +257,7 @@ static void cup28_storage_init(Cup28MachineState *s, MemoryRegion *mem,
                                         &s->p28_eeprom_regs, 3);
     cup28_bksram_init(s);
     memory_region_add_subregion_overlap(mem, 0x12000000, &s->p28_bksram, 1);
-    melco_nvram_init(&s->p28_bkeeprom, OBJECT(s), "cup28-backup-eeprom",
-                     (s->eeprom && *s->eeprom) ? s->eeprom : NULL, MiB, 0xff);
+    cup28_bkeeprom_init(s);
     memory_region_add_subregion_overlap(mem, 0x18000000, &s->p28_bkeeprom, 1);
 
     /* STUB: the FLR driver sees a blank 256 KiB read/write window. */

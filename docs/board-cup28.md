@@ -28,6 +28,14 @@ role of the `CUP2001E` modules is not modelled.
 | Selftest / RTC | `0xff93c000`, `0xffc80000` (alias `0x1fc80000`) | Board-revision ADC sample; real-time clock |
 | Nonvolatile state | XIP flash at `0x0` (alias `0x02000000`), battery SRAM at `0x12000000`, backup EEPROM at `0x18000000` | File-backed flash, battery SRAM and backup EEPROM. The guest formats the EEPROM itself (`EEPROM  ` header at offset 0) and keeps its power-on counters and clock at `+0x70` |
 
+The About screen's HW version is the eight bytes at offset `0x7ff0` of the
+backup EEPROM: five packed-BCD bytes shown as ten digits, then a three-byte
+suffix. An erased tail shows as ten `?` and three `0xff` bytes, so the machine
+seeds those eight bytes with the placeholder `0000000000 AA` when they are all
+`0xff`, and leaves an identity a unit already holds alone. The placeholder
+stands in for the factory part number, which this machine does not have. The
+unit keeps the identity in `eeprom.bin` alongside its guest-managed state.
+
 The vehicle peer sends market `06` in FBlock `F5/2B2` and US English
 `11` in `F5/2C1`. The firmware's MOST handler reads those settings and
 persists them. On the tested disc, the stock guidance files are used on
