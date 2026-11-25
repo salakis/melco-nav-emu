@@ -11,7 +11,7 @@ calls in machine/cup2006*.c and machine/cup28*.c) to hw/sh4/trace-events, so
 
 --- a/hw/sh4/trace-events
 +++ b/hw/sh4/trace-events
-@@ -1,3 +1,163 @@
+@@ -1,3 +1,168 @@
  # sh7750.c
  sh7750_porta(uint16_t prev, uint16_t cur, uint16_t pdtr, uint16_t pctr) "porta changed from 0x%04x to 0x%04x (pdtra=0x%04x, pctra=0x%08x)"
  sh7750_portb(uint16_t prev, uint16_t cur, uint16_t pdtr, uint16_t pctr) "portb changed from 0x%04x to 0x%04x (pdtrb=0x%04x, pctrb=0x%08x)"
@@ -19,6 +19,7 @@ calls in machine/cup2006*.c and machine/cup28*.c) to hw/sh4/trace-events, so
 +cup2006_2dg_dg_skip_pc_word(unsigned a0, unsigned a1, const char * a2) "cup2006: 2DG skip pc=0x%08x word=0x%08x: %s"
 +cup2006_2dg_dg_work_budget_exceeded(uint64_t a0) "cup2006: 2DG work budget exceeded in job#%" PRIu64 ""
 +cup2006_2dg_dg_walk_stop_fetch(unsigned a0) "cup2006: 2DG walk stop: fetch at 0x%08x outside RAM"
++cup2006_2dg_dg_bounds_pc_word(unsigned a0, unsigned a1, const char * a2) "cup2006: 2DG bounds reject pc=0x%08x word=0x%08x: %s"
 +cup2006_2dg_dg_raster_job_st(uint64_t a0, unsigned a1, unsigned a2, unsigned a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7, unsigned a8) "cup2006: 2DG raster job#%" PRIu64 " list=0x%08x steps=%u packets=%u blits=%" PRIu64 " pixels=%" PRIu64 " not_modelled=%" PRIu64 " bounds=%" PRIu64 " dest=0x%08x"
 +cup2006_2dg_dg_job_one_intc2(uint64_t a0) "cup2006: 2DG job #%" PRIu64 " done; INTC2 0xFFE00044 bit 20 is clear, so the guest has not enabled INTEVT 0x8c0: no interrupt"
 +cup2006_2dg_dg_job_one_x008(uint64_t a0, unsigned a1) "cup2006: 2DG job #%" PRIu64 " done, +0x008=0x%08x does not enable bit 0: no INTEVT 0x8c0"
@@ -83,6 +84,13 @@ calls in machine/cup2006*.c and machine/cup28*.c) to hw/sh4/trace-events, so
 +cup2006_mbx_arm_pages(unsigned a0, unsigned a1, unsigned a2) "cup2006: mbx arm #%u pages 0x%08x..0x%08x"
 +cup2006_mbx_stub_mbx_completion_x12c(uint32_t a0, unsigned a1, int64_t a2) "cup2006: STUB mbx completion #%" PRIu32 ": +0x12C bit 6 set (parameter memory ready) pc=0x%08x t=%" PRId64 "ms"
 +cup2006_mbx_stub_mbx_x800_ta(uint64_t a0, unsigned a1, int64_t a2) "cup2006: STUB mbx +0x800 TA start #%" PRIu64 " pc=0x%08x t=%" PRId64 "ms"
++cup2006_mbx3d_stats(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6) "cup2006: MBX1 model scenes=%" PRIu64 " objects=%" PRIu64 " prims=%" PRIu64 " renders=%" PRIu64 " tiles=%" PRIu64 " stream_errors=%" PRIu64 " violations=%" PRIu64 ""
++cup2006_soc_unmodelled_read(const char * a0, unsigned a1, unsigned a2, unsigned a3, unsigned a4, unsigned a5) "cup2006: SH7785 register %s at 0x%08x (size %u) is not modelled; read as its manual reset value 0x%08x (undefined=%u) pc=0x%08x"
++cup2006_soc_unmodelled_write(const char * a0, unsigned a1, unsigned a2, unsigned a3, unsigned a4) "cup2006: SH7785 register %s at 0x%08x (size %u) is not modelled; write dropped (manual reset value 0x%08x) pc=0x%08x"
++cup2006_mbx3d_irq(int a0, unsigned a1, unsigned a2, unsigned a3) "cup2006: MBX1 model line=%d status=0x%08x enable=0x%08x pc=0x%08x"
++cup2006_mbx3d_log(const char * a0) "cup2006: MBX1 model: %s"
++cup2006_mbx3d_master_read(unsigned a0, unsigned a1) "cup2006: MBX1 model reads 0x%08x len=%u"
++cup2006_mbx3d_master_write(unsigned a0, unsigned a1) "cup2006: MBX1 model writes 0x%08x len=%u"
 +cup2006_mbx_stub_mbx_x680_render(uint64_t a0, unsigned a1, unsigned a2, unsigned a3, unsigned a4, int64_t a5) "cup2006: STUB mbx +0x680 render #%" PRIu64 " target=0x%08x %ux%u pc=0x%08x t=%" PRId64 "ms"
 +cup2006_mbx_stub_mbx_x81c_kick(uint64_t a0, unsigned a1, int64_t a2) "cup2006: STUB mbx +0x81C kick #%" PRIu64 ": +0x12C bit 8 set pc=0x%08x t=%" PRId64 "ms"
 +cup2006_mbx_kick_x130_with_x838(unsigned a0, unsigned a1, unsigned a2) "cup2006: mbx kick #%u +0x130=0x%08x with +0x838=%u"
@@ -172,6 +180,3 @@ calls in machine/cup2006*.c and machine/cup28*.c) to hw/sh4/trace-events, so
 +melco_amdflash_program(uint64_t a0, uint64_t a1, unsigned a2) "melco-amdflash: program 0x%08" PRIx64 " value=0x%08" PRIx64 " size=%u"
 +melco_amdflash_sector_erase(uint64_t a0, uint64_t a1) "melco-amdflash: sector erase 0x%08" PRIx64 " len=0x%08" PRIx64
 +melco_amdflash_chip_erase(void) "melco-amdflash: chip erase"
-+cup2006_soc_unmodelled_read(const char * a0, unsigned a1, unsigned a2, unsigned a3, unsigned a4, unsigned a5) "cup2006: SH7785 register %s at 0x%08x (size %u) is not modelled; read as its manual reset value 0x%08x (undefined=%u) pc=0x%08x"
-+cup2006_soc_unmodelled_write(const char * a0, unsigned a1, unsigned a2, unsigned a3, unsigned a4) "cup2006: SH7785 register %s at 0x%08x (size %u) is not modelled; write dropped (manual reset value 0x%08x) pc=0x%08x"
-+cup2006_2dg_dg_bounds_pc_word(unsigned a0, unsigned a1, const char * a2) "cup2006: 2DG bounds reject pc=0x%08x word=0x%08x: %s"

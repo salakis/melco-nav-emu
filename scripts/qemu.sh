@@ -72,6 +72,9 @@ for f in "$ROOT"/machine/*.c "$ROOT"/machine/*.c.inc "$ROOT"/machine/*.h; do
   [ -e "$f" ] || continue
   ln -sfn "../../../../machine/$(basename "$f")" "$SRC/hw/sh4/$(basename "$f")"
 done
+# The vendored PowerVR MBX1 model keeps its own directory so that its MIT
+# headers stay beside their sources (machine/mbx/README.melco.md).
+ln -sfn ../../../../machine/mbx "$SRC/hw/sh4/mbx"
 
 # QEMU's configure wants tomli (Python < 3.11) and ninja: use the project venv.
 VENV="$ROOT/.venv"

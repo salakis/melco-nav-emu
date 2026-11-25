@@ -306,10 +306,13 @@ def _machine_opts():
 
     A map disc is in the drive, as in a real installed unit; F11 ejects it
     and inserts the next one (disc 2, then disc 1 again), as during a map
-    install.  The MBX 3D core is not emulated, so Navi's 3D car marker is
-    missing from the 3D map view; CUP2006_CARMARKER=1 draws an approximation
-    of it (a STUB whose colours and shading are the emulator's, see
-    machine/cup2006.c)."""
+    install.  CUP2006_MBX3D=1 runs the 3D core on the vendored PowerVR MBX1
+    model (machine/mbx, MIT), which is experimental: it parses the guest's TA
+    stream and rasterises its scene, but the guest still stops after the first
+    map composition (docs/mbx3d.md).  The default keeps the register latch
+    window, where the 3D car marker is missing and CUP2006_CARMARKER=1 draws
+    an approximation of it (a STUB whose colours and shading are the
+    emulator's, see machine/cup2006.c)."""
     opts = ["cup2006", "selftest=on", "intcinit=on", "rtc=on", "ata=on",
             "subpeer=on", "dvd5irq=on", "carsig=on", "acckey=on"]
     if DISC.is_file():
@@ -317,6 +320,8 @@ def _machine_opts():
     if DISC.is_file() and DISC2.is_file():
         opts.append("dvdnext=%s" % _escape(DISC2))
     opts.append("carmarket=%s" % CARMARKET)
+    if os.environ.get("CUP2006_MBX3D", "") not in ("", "0"):
+        opts.append("mbx3d=on")
     if os.environ.get("CUP2006_CARMARKER", "") not in ("", "0"):
         opts.append("carmarker=on")
     return opts

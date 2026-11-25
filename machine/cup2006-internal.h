@@ -133,6 +133,15 @@ OBJECT_DECLARE_SIMPLE_TYPE(Cup2006MachineState, CUP2006_MACHINE)
 #define CUP2006_MBX_TA_START     0x00000800
 #define CUP2006_MBX_ST_POLLED    (CUP2006_MBX_ST_TA_KICK | CUP2006_MBX_ST_TA_DONE)
 #define CUP2006_MBX_RENDER_START 0x00000680
+/*
+ * The 8 MiB TA window at 0xFD800000.  Its first half is the TA's input FIFO;
+ * the second half is the TA control port, where the firmware writes 1 to end
+ * an object and 0 to restart a strip (measured: nothing else ever lands
+ * there).  Both halves are one memory region to the SoC, so the split is the
+ * board's, not the core's.
+ */
+#define CUP2006_MBX_TA_SIZE      0x00800000
+#define CUP2006_MBX_TA_CTL       0x00400000
 #define CUP2006_DU_SIZE          0x00001000
 #define CUP2006_DU_DSYSR         0x000
 #define CUP2006_DU_DSSR          0x008
@@ -645,6 +654,16 @@ struct Cup2006MachineState {
     uint32_t *mbx_ta_buf;              /* this frame's FIFO writes (off,val) */
     unsigned mbx_ta_n;
     uint64_t mbx_marker_frames;
+    /*
+     * The vendored PowerVR MBX1 model (machine/mbx, MIT), or NULL with
+     * mbx3d=off, when the latch window below is the live device.  With the
+     * model present the latch is a shadow of the registers it decodes, kept
+     * for the traces and for carmarker=on.
+     */
+    struct mbxemu *mbx3d;
+    bool mbx3d_requested;              /* mbx3d=on: build the model at init */
+    uint32_t *mbx3d_lane;              /* narrow-access assembly, MBX_SIZE/4 */
+    bool mbx3d_trace_all;              /* CUP2006_MBX3D_TRACE: the model's log */
     uint32_t mbx_kick_count;           /* STUB +0x130 bit-6 kicks seen */
     uint32_t mbx_arm_count;            /* STUB +0x838 = 1 descriptor arms */
     /* DU register file and scan-out. */
@@ -855,6 +874,14 @@ void cup2006_mbx_note(Cup2006MachineState *s, hwaddr phys, bool is_write, unsign
 uint64_t cup2006_mbx_read(Cup2006MachineState *s, hwaddr base, hwaddr addr, unsigned size);
 void cup2006_mbx_ta_frame(Cup2006MachineState *s);
 void cup2006_mbx_update_irq(Cup2006MachineState *s, const char *why);
+/* machine/cup2006-mbx3d.c: the vendored PowerVR MBX1 model (MIT). */
+void cup2006_mbx3d_init(Cup2006MachineState *s);
+void cup2006_mbx3d_reset(Cup2006MachineState *s);
+uint64_t cup2006_mbx3d_read(Cup2006MachineState *s, uint32_t off, unsigned size);
+void cup2006_mbx3d_write(Cup2006MachineState *s, uint32_t off, uint64_t value,
+                         unsigned size);
+void cup2006_mbx3d_ta_write(Cup2006MachineState *s, hwaddr addr,
+                            uint64_t value);
 uint64_t cup2006_mmio_read(hwaddr addr, unsigned size);
 void cup2006_mmio_write(hwaddr addr, uint64_t value, unsigned size);
 uint64_t cup2006_pcc_regs_read(void *opaque, hwaddr addr, unsigned size);

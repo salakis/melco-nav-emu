@@ -446,7 +446,7 @@ static void cup2006_cpu_reset(void *opaque)
  * carmarker=on keeps one frame's writes for cup2006_mbx_draw_marker. */
 #define CUP2006_MBX_TA_BASE     0xfd800000
 #define CUP2006_MBX_TA_A7_BASE  0x1d800000
-#define CUP2006_MBX_TA_SIZE     0x00800000
+/* CUP2006_MBX_TA_SIZE and _CTL are in cup2006-internal.h: the glue splits it */
 #define CUP2006_MBX_TA_MAX      65536
 
 static void cup2006_mbx_ta_note(Cup2006MachineState *s, hwaddr addr,
@@ -631,6 +631,10 @@ static void cup2006_mbx_ta_write(void *opaque, hwaddr addr, uint64_t value,
 {
     Cup2006MachineState *s = opaque;
 
+    if (s->mbx3d) {
+        cup2006_mbx3d_ta_write(s, addr, value);
+        return;
+    }
     if (s->carmarker) {
         cup2006_mbx_ta_note(s, addr, value, size);
     }
@@ -1420,6 +1424,16 @@ static void cup2006_init(MachineState *machine)
      * MBX/3DG register window, always on; both aliases are mapped so the log
      * names the address the guest used (the driver uses 0x1D000000). */
     s->mbx_window = g_new0(uint32_t, CUP2006_MBX_SIZE / 4);
+    if (s->mbx3d_requested) {
+        if (s->carmarker) {
+            warn_report("cup2006: carmarker=on draws a host-side marker over "
+                        "the scene the MBX1 model renders; leaving it on");
+        }
+        s->mbx3d_lane = g_new0(uint32_t, CUP2006_MBX_SIZE / 4);
+        s->mbx3d_trace_all = getenv("CUP2006_MBX3D_TRACE") != NULL;
+        cup2006_mbx3d_init(s);
+        cup2006_mbx3d_reset(s);
+    }
     memory_region_init_io(&s->mbx_regs, NULL, &cup2006_mbx_ops,
                           s, "cup2006-mbx", CUP2006_MBX_SIZE);
     memory_region_add_subregion_overlap(sysmem, CUP2006_MBX_BASE,
@@ -1760,6 +1774,16 @@ static void cup2006_set_carmarker(Object *obj, bool value, Error **errp)
     CUP2006_MACHINE(obj)->carmarker = value;
 }
 
+static bool cup2006_get_mbx3d(Object *obj, Error **errp)
+{
+    return CUP2006_MACHINE(obj)->mbx3d_requested;
+}
+
+static void cup2006_set_mbx3d(Object *obj, bool value, Error **errp)
+{
+    CUP2006_MACHINE(obj)->mbx3d_requested = value;
+}
+
 static void cup2006_machine_instance_init(Object *obj)
 {
     /* Off by default. */
@@ -1829,6 +1853,20 @@ static void cup2006_machine_class_init(ObjectClass *oc, const void *data)
     object_class_property_set_description(oc, "carmarker",
         "STUB, off by default: draw an approximation of Navi's 3D car marker "
         "(the MBX 3D core is not emulated, so the marker is otherwise missing)");
+
+    /*
+     * The vendored PowerVR MBX1 model (machine/mbx, MIT).  Off by default so
+     * that everything the board is tested against keeps the latch window.
+     */
+    object_class_property_add_bool(oc, "mbx3d",
+                                   cup2006_get_mbx3d,
+                                   cup2006_set_mbx3d);
+    object_class_property_set_description(oc, "mbx3d",
+        "off by default, experimental: run the 3D core on the vendored "
+        "PowerVR MBX1 model (TA stream, VGP, tile rasteriser, depth, "
+        "textures, blending) instead of the register latch window; the model "
+        "parses this firmware's TA stream but the guest still stops after the "
+        "first map composition (docs/mbx3d.md)");
 
 
     /*

@@ -232,10 +232,28 @@ chip, `sensors.csv` for the car's wheel and gyro sensors on the same clock).
 
 ### Limitations and STUBs
 
-- **3D map car marker.** Navi draws it with the PowerVR MBX 3D core, which is
-  not emulated, so the 3D view has no marker. `CUP2006_CARMARKER=1` draws an
-  approximation from the guest's geometry with the emulator's own colours and
-  shading. The 2D view's marker is the guest's own drawing.
+- **3D map car marker.** Off by default the PowerVR MBX 3D core is the
+  register latch window (`machine/cup2006-mbx.c`), which latches writes and
+  raises the completion bits the driver polls but rasterises nothing, so the
+  3D view has no marker and `CUP2006_CARMARKER=1` draws an approximation from
+  the guest's geometry with the emulator's own colours and shading.
+  **`CUP2006_MBX3D=1` runs the core itself** on the vendored MBX1 model
+  (`machine/mbx/`, MIT, from the Nokia N810 revival project) — the TA stream,
+  the VGP, the tile rasteriser, depth and alpha tests, texturing and blending.
+  It is experimental: the model decodes the TA stream this firmware sends and
+  rasterises its scene, but the guest still stops after the first map
+  composition, because the ISP's parameter buffer, tile grid and region array
+  do not match what this driver sets up — six contract clauses fail on every
+  scene. [docs/mbx3d.md](docs/mbx3d.md) has the measurements, what the model
+  covers, what it assumes, the three readings it corrected in the latch model
+  and the four stream deviations it needed. Leave the switch off unless you are
+  working on the model. The 2D view's marker is the guest's own drawing either
+  way.
+- **2D display list.** Every ROP3 is evaluated (`cup2006_dg_rop3()`), not only
+  0xCC, and the counters now separate the two reasons a packet does not draw:
+  `not_modelled` (the engine's behaviour is missing) and `bounds` (a
+  defensive reject). Still unimplemented: most draw-mode bits, relative clip,
+  non-16bpp RCLR, the LINE family and unknown opcodes.
 - **Display.** The DU model implements the commands the tested firmware uses,
   plus one behaviour the SH7785 manual does not describe but the guest depends
   on: it raises INTEVT 0x780 with every DIER enable clear (STUB departure).
@@ -297,6 +315,8 @@ A scenario directory holds:
 | `CUP2006_SCENARIO` | CU-P2006 | replay a shipped GPS scenario |
 | `CUP2006_CARMARKET=<hex>` | CU-P2006 | market byte from the car (region/marque table above) |
 | `CUP2006_CARMARKER=1` | CU-P2006 | draw an approximation of the 3D car marker (see limitations) |
+| `CUP2006_MBX3D=1` | CU-P2006 | experimental: run the 3D core on the PowerVR MBX1 model instead of the latch window; it parses this firmware's TA stream but the guest still stops after the first map composition ([docs/mbx3d.md](docs/mbx3d.md)) |
+| `CUP2006_MBX3D_TRACE=1` | CU-P2006 | with `CUP2006_MBX3D=1`: log every TA word and register access the model decodes |
 | `DISPLAY_BACKEND=sdl` / `none` | both | QEMU display backend instead of the per-unit default (`cocoa,zoom-to-fit=on` on macOS, `sdl` elsewhere) |
 | `-trace 'cup2006_*'` / `-trace 'cup28_*'` | both | log device activity on stderr; pass after `--`, e.g. `.venv/bin/python -m melco_nav_emu.cli boot -- --trace 'cup28_*'` |
 
@@ -316,7 +336,10 @@ qemu/core-patches/  machine registration, small SH-4 changes, and
                     used by bootcheck)
 docs/               board and device model notes: docs/board-cup28.md,
                     docs/sensors.md, docs/flash-notes.md (the NOR flash
-                    command sets both boards implement)
+                    command sets both boards implement), docs/mbx3d.md
+                    (the vendored PowerVR MBX1 model), docs/soc-registers.md
+                    (the SH7785 register table the unmodelled-access
+                    diagnostic reads)
 scenarios/          two 3-minute GPS drives (OpenStreetMap-based, ODbL 1.0:
                     see scenarios/LICENSE)
 screenshots/        UI screenshots (plain PNGs, no metadata chunks)

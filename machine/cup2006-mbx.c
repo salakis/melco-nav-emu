@@ -17,6 +17,18 @@ static void cup2006_mbx_write(Cup2006MachineState *s, hwaddr base,
     uint32_t *slot = &s->mbx_window[off >> 2];
     uint32_t old = *slot;
 
+    /*
+     * With the MBX1 model present (mbx3d=on) it decodes the window, including
+     * the TA, 2D and TA-control slave ports the latch model never had. The
+     * latch's own completion STUBs below stay out of the way: they would add
+     * bits the model did not set.
+     */
+    if (s->mbx3d) {
+        cup2006_mbx3d_write(s, off, value, size);
+        cup2006_mbx_note(s, phys, true, size, value);
+        return;
+    }
+
     /* Writes latch and read back; the side effects are +0x12C/+0x130/+0x134. */
     *slot = (old & ~(mask << shift)) | (((uint32_t)value & mask) << shift);
     /*

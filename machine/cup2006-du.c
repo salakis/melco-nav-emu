@@ -82,6 +82,17 @@ uint64_t cup2006_mbx_read(Cup2006MachineState *s, hwaddr base,
     uint32_t value;
     bool mbx_status_bits = false;
 
+    /*
+     * With the MBX1 model present it owns the window: its status word, its
+     * write-1-to-clear and its own FIFO-fill bits are the real ones, so the
+     * latch model's inferred bits below must not be added on top.
+     */
+    if (s->mbx3d) {
+        value = cup2006_mbx3d_read(s, off, size);
+        cup2006_mbx_note(s, phys, false, size, value);
+        return value;
+    }
+
     /* Stored read-back, except +0x12C: the real status word. */
     value = s->mbx_window[off >> 2] >> shift;
 
