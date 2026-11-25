@@ -17,6 +17,19 @@
 #define CUP28_MOST_PEER_ADDR 0x0154
 #define CUP28_MOST_SYNC_QUADLETS 14
 
+/*
+ * bXRTY and bXTIM, the transmit retry count and the transmit timeout, in the
+ * OS8104's page-0 transmit buffer.  The values are the datasheet's defaults:
+ * 6 retries and 11 block times, about 4 ms at the 44.1 kHz frame rate.  They
+ * are seeded so that a driver sizing a deadline from them reads the
+ * datasheet's number instead of 0; the offsets are the enumeration's and are
+ * not confirmed against this unit's own driver.
+ */
+#define CUP28_MOST_REG_XRTY      0xbf
+#define CUP28_MOST_REG_XTIM      0xbe
+#define CUP28_MOST_XRTY_DEFAULT  6
+#define CUP28_MOST_XTIM_DEFAULT  11
+
 static uint8_t cup28_most_reverse(uint8_t b)
 {
     b = (b >> 4) | (b << 4);
@@ -746,6 +759,10 @@ void cup28_most_init(Cup28MachineState *s, MemoryRegion *mem, SuperHCPU *cpu)
     s->p28_most_registers[0][0x80] = 0x20; /* bXCR reset, manual p.37 */
     s->p28_most_registers[0][0x81] = 0x50; /* bXSR reset, manual p.38 */
     s->p28_most_registers[0][0x86] = 4; /* power-on complete, manual p.117 */
+    /* A guest write still wins: these are the same array, so only the
+     * pre-write read differs from 0. */
+    s->p28_most_registers[0][CUP28_MOST_REG_XRTY] = CUP28_MOST_XRTY_DEFAULT;
+    s->p28_most_registers[0][CUP28_MOST_REG_XTIM] = CUP28_MOST_XTIM_DEFAULT;
     memset(s->p28_most_registers[3] + 0x80, 0x70, 60); /* mCRA reset, p.131 */
     s->p28_most_power_on = true;
     s->p28_most_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, cup28_most_tick, s);
