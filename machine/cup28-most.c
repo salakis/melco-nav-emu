@@ -178,42 +178,93 @@ static bool cup28_most_dequeue(Cup28MachineState *s)
     return true;
 }
 
+/* What the fixed vehicle peer announces, in the order the guest's handshake
+ * asks for it (OS8104 receive control buffer, §13.2.6).  Status (0xC)
+ * handlers in mst.dll: 02/A00 -> 0103814c (mode).  The F5 reports supply the
+ * vehicle settings read by HMIManager 0003b810, with a valid vehicle and
+ * optional receivers disabled; the guest reads them as naviRegion and
+ * ParseLanguage and persists them, which is why the machine's carmarket and
+ * carlanguage pick the car the unit sits in.  A language of 0 means the car
+ * states none: that message is left out and the unit keeps its own default
+ * (UK English). */
+#define CUP28_MOST_MARKET_MESSAGE 2
+#define CUP28_MOST_LANGUAGE_MESSAGE 7
+
+static const uint8_t cup28_most_vc_messages[][6] = {
+    { 0x02, 0, 0xa0, 0x0c, 1, 1 },
+    { 0xf5, 0, 0x2b, 0x1c, 1, 2 }, /* navigation vehicle valid */
+    { 0xf5, 0, 0x2b, 0x2c, 1, 0x06 }, /* market, Volvo */
+    { 0xf5, 0, 0x2b, 0xbc, 1, 1 }, /* GPS receiver setting (guest logs gpsReceiver=1) */
+    { 0xf5, 0, 0x2b, 0xcc, 1, 1 }, /* TMC receiver absent */
+    { 0xf5, 0, 0x2b, 0xec, 1, 1 }, /* voice vehicle valid */
+    { 0xf5, 0, 0x2b, 0xfc, 1, 1 }, /* voice control absent */
+    { 0xf5, 0, 0x2c, 0x1c, 1, 0x11 }, /* language */
+    /* DeviceMode Normal (F3/200 SetGet, mst.dll 010458fc -> event
+     * 0x64; HMIManager "NMOSTDeviceModeEvent 0x00:Normal" powers the
+     * DVD), then ApplicationMode Active for NAVI (F1 instance 4,
+     * F1/201 SetGet, mst.dll 0103ea38 -> event 0x4d; modes 0 Active,
+     * 1 Limited, 2 Passive, 3 Shutdown per HMIManager's log table;
+     * SetMonitorOnOff(1)). Without these HMI never logs a device or
+     * application mode. */
+    { 0xf3, 0, 0x20, 0x02, 1, 0 },
+    { 0xf1, 4, 0x20, 0x12, 1, 0 },
+    /* F1/101 StartResult, source 1. MST 0103ddfc posts event
+     * 0x4f and ClassLib 01542fb8 requests synchronous channels. */
+    { 0xf1, 4, 0x10, 0x12, 1, 1 },
+};
+
+static bool cup28_most_vc_skipped(Cup28MachineState *s, unsigned index)
+{
+    return index == CUP28_MOST_LANGUAGE_MESSAGE && !s->p28_most_language;
+}
+
+/* How many messages this car has to announce. */
+static unsigned cup28_most_vc_count(Cup28MachineState *s)
+{
+    unsigned count = 0, i;
+
+    for (i = 0; i < G_N_ELEMENTS(cup28_most_vc_messages); i++) {
+        count += !cup28_most_vc_skipped(s, i);
+    }
+    return count;
+}
+
+/* The nth message of those, with the car's own market and language. */
+static const uint8_t *cup28_most_vc_message(Cup28MachineState *s, unsigned n,
+                                            uint8_t *buffer)
+{
+    unsigned i;
+
+    for (i = 0; i < G_N_ELEMENTS(cup28_most_vc_messages); i++) {
+        if (cup28_most_vc_skipped(s, i)) {
+            continue;
+        }
+        if (!n--) {
+            memcpy(buffer, cup28_most_vc_messages[i],
+                   sizeof(cup28_most_vc_messages[i]));
+            if (i == CUP28_MOST_MARKET_MESSAGE) {
+                buffer[5] = s->p28_most_market;
+            } else if (i == CUP28_MOST_LANGUAGE_MESSAGE) {
+                buffer[5] = s->p28_most_language;
+            }
+            return buffer;
+        }
+    }
+    return NULL;
+}
+
 static void cup28_most_vc_deliver(Cup28MachineState *s)
 {
-    /* STUB: a fixed vehicle peer announces application mode, language and
-     * region through the OS8104 receive control buffer (§13.2.6).
-     * Status (0xC) handlers in mst.dll: 02/A00 -> 0103814c (mode).
-     * The F5 reports supply the vehicle settings read by HMIManager
-     * 0003b810, with a valid vehicle and optional receivers disabled. */
-    static const uint8_t messages[][6] = {
-        { 0x02, 0, 0xa0, 0x0c, 1, 1 },
-        { 0xf5, 0, 0x2b, 0x1c, 1, 2 }, /* navigation vehicle valid */
-        { 0xf5, 0, 0x2b, 0x2c, 1, 0x06 }, /* North America, Volvo */
-        { 0xf5, 0, 0x2b, 0xbc, 1, 1 }, /* GPS receiver setting (guest logs gpsReceiver=1) */
-        { 0xf5, 0, 0x2b, 0xcc, 1, 1 }, /* TMC receiver absent */
-        { 0xf5, 0, 0x2b, 0xec, 1, 1 }, /* voice vehicle valid */
-        { 0xf5, 0, 0x2b, 0xfc, 1, 1 }, /* voice control absent */
-        { 0xf5, 0, 0x2c, 0x1c, 1, 0x11 }, /* North American English */
-        /* DeviceMode Normal (F3/200 SetGet, mst.dll 010458fc -> event
-         * 0x64; HMIManager "NMOSTDeviceModeEvent 0x00:Normal" powers the
-         * DVD), then ApplicationMode Active for NAVI (F1 instance 4,
-         * F1/201 SetGet, mst.dll 0103ea38 -> event 0x4d; modes 0 Active,
-         * 1 Limited, 2 Passive, 3 Shutdown per HMIManager's log table;
-         * SetMonitorOnOff(1)). Without these HMI never logs a device or
-         * application mode. */
-        { 0xf3, 0, 0x20, 0x02, 1, 0 },
-        { 0xf1, 4, 0x20, 0x12, 1, 0 },
-        /* F1/101 StartResult, source 1. MST 0103ddfc posts event
-         * 0x4f and ClassLib 01542fb8 requests synchronous channels. */
-        { 0xf1, 4, 0x10, 0x12, 1, 1 },
-    };
-    unsigned message = s->p28_most_vc_sent;
-    if (message >= G_N_ELEMENTS(messages)) {
+    uint8_t message[6];
+    const uint8_t *next = cup28_most_vc_message(s, s->p28_most_vc_sent,
+                                                message);
+
+    if (!next) {
         return;
     }
-    cup28_most_receive(s, messages[message], sizeof(messages[message]));
+    cup28_most_receive(s, next, sizeof(message));
     s->p28_most_vc_sent++;
-    s->p28_most_vc_complete = s->p28_most_vc_sent == G_N_ELEMENTS(messages);
+    s->p28_most_vc_complete = s->p28_most_vc_sent == cup28_most_vc_count(s);
 }
 
 /* STUB: the vehicle peer reports its wrapping wheel counter at the gyro

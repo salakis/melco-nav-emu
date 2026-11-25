@@ -155,6 +155,12 @@ struct Cup28MachineState {
     bool p28_most_wheel_on, p28_most_vc_complete;
     uint8_t p28_most_wheel_counter;
     QEMUTimer *p28_most_gps_timer;
+    /* The vehicle peer's market (F5/2B2) and language (F5/2C1).  STUB: a
+     * real car is configured with them in the workshop; here the launcher
+     * takes them from the map disc in the drive, so that a fresh unit
+     * regionalises like the car the disc was made for. */
+    char *carmarket, *carlanguage;
+    uint8_t p28_most_market, p28_most_language;
     /* CUP28 GPS receiver UART (cup28-gps.c) */
     MemoryRegion p28_gps_io;
     struct intc_source *p28_gps_tx_src;

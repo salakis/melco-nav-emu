@@ -359,10 +359,58 @@ CUP28_PATH_PROPERTY(sramsave)
 CUP28_PATH_PROPERTY(eeprom)
 CUP28_PATH_PROPERTY(gpstrack)
 
+/*
+ * The vehicle peer's market and language, one hex byte each (MOST
+ * properties F5/2B2 and F5/2C1).  A real car has them set in the workshop;
+ * the launcher takes them from the map disc in the drive, and the defaults
+ * here are the North American pair the tested disc set belongs to, so a bare
+ * -M cup28 behaves as it did before these properties existed.
+ */
+#define CUP28_HEX_BYTE_PROPERTY(name, field)                             \
+    static char *cup28_get_##name(Object *obj, Error **errp)             \
+    {                                                                   \
+        return g_strdup(CUP28_MACHINE(obj)->name);                       \
+    }                                                                   \
+    static void cup28_set_##name(Object *obj, const char *value,        \
+                                 Error **errp)                          \
+    {                                                                   \
+        Cup28MachineState *s = CUP28_MACHINE(obj);                       \
+        char *end;                                                      \
+        unsigned long v;                                                \
+                                                                        \
+        if (!value || !*value) {                                        \
+            return;             /* keep the default */                  \
+        }                                                               \
+        v = strtoul(value, &end, 16);                                    \
+        if (*end || v > 0xff) {                                         \
+            error_setg(errp, #name ": a hex byte, not '%s'", value);     \
+            return;                                                     \
+        }                                                               \
+        g_free(s->name);                                                \
+        s->name = g_strdup(value);                                      \
+        s->field = v;                                                   \
+    }
+
+CUP28_HEX_BYTE_PROPERTY(carmarket, p28_most_market)
+CUP28_HEX_BYTE_PROPERTY(carlanguage, p28_most_language)
+
+static void cup28_instance_init(Object *obj)
+{
+    Cup28MachineState *s = CUP28_MACHINE(obj);
+
+    /* North America, US English: what the tested disc set is made for. */
+    s->carmarket = g_strdup("06");
+    s->carlanguage = g_strdup("11");
+    s->p28_most_market = 0x06;
+    s->p28_most_language = 0x11;
+}
+
 static void cup28_finalize(Object *obj)
 {
     Cup28MachineState *s = CUP28_MACHINE(obj);
 
+    g_free(s->carmarket);
+    g_free(s->carlanguage);
     g_free(s->dvdimage);
     g_free(s->drfimage);
     g_free(s->sramsave);
@@ -402,6 +450,16 @@ static void cup28_class_init(ObjectClass *oc, const void *data)
     object_class_property_add_str(oc, "gpstrack", cup28_get_gpstrack,
                                   cup28_set_gpstrack);
     object_class_property_set_description(oc, "gpstrack", "GPS and sensor track CSV");
+    object_class_property_add_str(oc, "carmarket", cup28_get_carmarket,
+                                  cup28_set_carmarket);
+    object_class_property_set_description(oc, "carmarket",
+                                          "Market the vehicle peer announces "
+                                          "(MOST F5/2B2), a hex byte");
+    object_class_property_add_str(oc, "carlanguage", cup28_get_carlanguage,
+                                  cup28_set_carlanguage);
+    object_class_property_set_description(oc, "carlanguage",
+                                          "Language the vehicle peer announces "
+                                          "(MOST F5/2C1), a hex byte");
 }
 
 static const TypeInfo cup28_types[] = {
@@ -409,6 +467,7 @@ static const TypeInfo cup28_types[] = {
         .name = TYPE_CUP28_MACHINE,
         .parent = TYPE_MACHINE,
         .instance_size = sizeof(Cup28MachineState),
+        .instance_init = cup28_instance_init,
         .instance_finalize = cup28_finalize,
         .class_init = cup28_class_init,
     },

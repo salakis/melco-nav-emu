@@ -1,14 +1,40 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Copyright (c) 2026 melco-nav-emu contributors
-"""Read files from the root of a plain ISO9660 disc."""
+"""Read files from the root of a plain ISO9660 disc, and its volume name."""
 from __future__ import annotations
 
 import struct
 from pathlib import Path
+from typing import BinaryIO
 
 from .images import ImageFormatError
 
 SECTOR = 2048
+
+
+def _primary_volume_descriptor(stream: BinaryIO) -> bytes:
+    """The primary volume descriptor, from sectors 16..79."""
+    for sector in range(16, 80):
+        stream.seek(sector * SECTOR)
+        pvd = stream.read(SECTOR)
+        if len(pvd) != SECTOR:
+            raise ImageFormatError('truncated ISO data at %#x'
+                                   % (sector * SECTOR))
+        if pvd[1:7] != b'CD001\x01' or pvd[0] == 255:
+            raise ImageFormatError('no ISO9660 primary volume descriptor')
+        if pvd[0] == 1:
+            return pvd
+    raise ImageFormatError('no ISO9660 primary volume descriptor')
+
+
+def volume_id(path: Path) -> str:
+    """The disc's volume identifier, e.g. `NA_0900_06A_WESTERN`.
+
+    The map discs name their market there, which is how the launcher picks
+    the car the unit sits in (`boards/cup28.py`)."""
+    with Path(path).open('rb') as stream:
+        pvd = _primary_volume_descriptor(stream)
+    return pvd[40:72].decode('latin-1').strip()
 
 
 def read_root_file(path: Path, name: str) -> bytes:
@@ -21,14 +47,7 @@ def read_root_file(path: Path, name: str) -> bytes:
                 raise ImageFormatError('truncated ISO data at %#x' % offset)
             return data
 
-        for sector in range(16, 80):
-            pvd = read(sector * SECTOR, SECTOR)
-            if pvd[1:7] != b'CD001\x01' or pvd[0] == 255:
-                raise ImageFormatError('no ISO9660 primary volume descriptor')
-            if pvd[0] == 1:
-                break
-        else:
-            raise ImageFormatError('no ISO9660 primary volume descriptor')
+        pvd = _primary_volume_descriptor(stream)
         lba = struct.unpack_from('<I', pvd, 158)[0]
         size = struct.unpack_from('<I', pvd, 166)[0]
         if size > 16 * 1024 * 1024:

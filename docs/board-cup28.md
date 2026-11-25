@@ -36,11 +36,36 @@ seeds those eight bytes with the placeholder `0000000000 AA` when they are all
 stands in for the factory part number, which this machine does not have. The
 unit keeps the identity in `eeprom.bin` alongside its guest-managed state.
 
-The vehicle peer sends market `06` in FBlock `F5/2B2` and US English
-`11` in `F5/2C1`. The firmware's MOST handler reads those settings and
-persists them. On the tested disc, the stock guidance files are used on
-subsequent boots. Speech recognition and text-to-speech are outside the
-verified path.
+The vehicle peer announces the car's market in FBlock `F5/2B2` and its
+language in `F5/2C1`; the firmware's MOST handler reads them as
+`NMOSTHandler::ParseNavigationRegion naviRegion=` and `ParseLanguage
+language=`, applies them and persists them. STUB: a real car has both set in
+the workshop, so this machine takes them from the map disc in the drive,
+whose volume name carries the market (`NA_0900_06A_WESTERN`): `NA_…` gives
+market `06` and US English `11` (miles), `EU_…` gives market `04` and states
+no language, so the unit keeps its own factory language (UK English, and
+kilometres), and any other name keeps the tested pair. `-M
+cup28,carmarket=…,carlanguage=…` (or `CUP28_CARMARKET` / `CUP28_CARLANGUAGE`)
+forces either byte; `carlanguage=00` means the car states none, so that
+message is left out of the announcement.
+
+A unit's first boot cannot apply them: the language needs the files the guest
+builds in its flash during that boot, so it logs `VPL_DataManager SetLangError`
+three times, 3 s apart, and stays in its factory default (UK English, so
+metric) for the whole session. Every later boot starts with the announced pair
+in effect, which is why `boot` spends one headless power-on on a new unit
+(`first-power-on.log`). Measured on the North American disc: the guest's setup
+writes land within 5 s of power-on and its first-boot sequence ends at about
+10 s; a later boot of that unit is pixel-identical to the second boot the old
+workaround needed. A unit follows a
+*change* the same way, one power-on later: announcing `04`/`01` to a unit set
+up as `06`/`11` still comes up US on that boot and Scandinavian on the next
+(the menus read `Vejledning` for `02`, `Vägledning` for `01`). The measured
+codes, by the language the menus come up in, are `01` Swedish, `02` Danish and
+`11` English (US).
+
+The stock guidance files are used on subsequent boots. Speech recognition and
+text-to-speech are outside the verified path.
 
 The replay drives the receiver fix, cumulative MOST wheel count and analog
 gyro sample from one virtual clock. CUP28 receives position and fix validity

@@ -12,12 +12,16 @@ from melco_nav_emu.images import ImageFormatError
 from melco_nav_emu.iso import read_root_file
 
 
-def make_disc(tmp_path: Path, payload: bytes) -> Path:
+def make_disc(tmp_path: Path, payload: bytes,
+              volume: bytes = b"NA_0900_06A_WESTERN") -> Path:
+    tmp_path = Path(tmp_path)
+    tmp_path.mkdir(parents=True, exist_ok=True)
     sector = 2048
     iso = bytearray(18 * sector)
     pvd = 16 * sector
     root = pvd + 156
     iso[pvd:pvd + 7] = b"\x01CD001\x01"
+    iso[pvd + 40:pvd + 40 + len(volume)] = volume
     iso[root] = 34
     struct.pack_into("<I", iso, root + 2, 17)
     struct.pack_into("<I", iso, root + 10, sector)
@@ -87,6 +91,9 @@ def test_cli_boot_uses_persistent_unit_and_unmodified_firmware(tmp_path, monkeyp
     unit = tmp_path / "test unit"
     qemu = tmp_path / "qemu-system-sh4"
     qemu.touch()
+    # A real launch spends one headless power-on on a new unit first; the
+    # command line this test checks is the one that boot runs afterwards.
+    monkeypatch.setattr(cup28, "first_power_on", lambda *a, **k: True)
     command = []
 
     def execv(path, argv):
@@ -101,6 +108,7 @@ def test_cli_boot_uses_persistent_unit_and_unmodified_firmware(tmp_path, monkeyp
     assert machine == (f"cup28,dvdimage={str(disc).replace(',', ',,')},"
                        f"drfimage={unit / 'flash.bin'},sramsave={unit / 'sram.bin'},"
                        f"eeprom={unit / 'eeprom.bin'},"
+                       "carmarket=06,carlanguage=11,"
                        "audiodev=nav")
     assert command[command.index("-audiodev") + 1] == "coreaudio,out.buffer-count=32,id=nav"
     kernel = Path(command[command.index("-kernel") + 1])
@@ -112,6 +120,9 @@ def test_default_boot_goes_through_the_cup2006_board(tmp_path, monkeypatch):
     qemu = tmp_path / "qemu-system-sh4"
     qemu.write_text("")
     monkeypatch.setattr(cup2006, "QEMU", qemu)
+    # Not this checkout's images/: `make test` must not depend on which disc
+    # set they happen to hold.
+    monkeypatch.setattr(cup2006, "EXTRACTED_SET", tmp_path / "no-disc-set")
     monkeypatch.setattr(cup2006, "first_power_on", lambda *a, **k: None)
     monkeypatch.setattr(cup2006, "unit_hdd", lambda u: tmp_path / "hdd.img")
     # No firmware in this repository: the NK is only stringified into
@@ -140,6 +151,7 @@ def test_boot_cup2006_unit_env_fallbacks(tmp_path, monkeypatch):
     qemu = tmp_path / "qemu-system-sh4"
     qemu.write_text("")
     monkeypatch.setattr(cup2006, "QEMU", qemu)
+    monkeypatch.setattr(cup2006, "EXTRACTED_SET", tmp_path / "no-disc-set")
     monkeypatch.setattr(cup2006, "first_power_on", lambda *a, **k: None)
     monkeypatch.setattr(cup2006, "unit_hdd", lambda u: tmp_path / "hdd.img")
     monkeypatch.setattr(cup2006, "find_nk",
@@ -158,6 +170,79 @@ def test_boot_cup2006_unit_env_fallbacks(tmp_path, monkeypatch):
     cli.main(["boot", "--display", "none"])
     machine = command[command.index("-M") + 1]
     assert "drfimage=%s" % (tmp_path / "old-unit" / "flash.img") in machine
+
+
+def test_car_market_follows_the_disc_in_the_drive(tmp_path, monkeypatch):
+    """A unit regionalises as the car the map disc was made for: the disc's
+    volume name carries the market, and the pair goes to the vehicle peer."""
+    monkeypatch.delenv("CUP28_CARMARKET", raising=False)
+    monkeypatch.delenv("CUP28_CARLANGUAGE", raising=False)
+    na = make_disc(tmp_path / "na", b"x", volume=b"NA_0900_06A_WESTERN")
+    eu = make_disc(tmp_path / "eu", b"x", volume=b"EU_0800_04A_WESTERN")
+    other = make_disc(tmp_path / "other", b"x", volume=b"XX_0000_00A_OTHER")
+    assert cup28.car_market(na) == ("06", "11")   # US English
+    assert cup28.car_market(eu) == ("04", "00")   # Europe, own language
+    # An unreadable or unrecognised disc keeps the tested North American pair.
+    assert cup28.car_market(other) == ("06", "11")
+    assert cup28.car_market(tmp_path / "absent.iso") == ("06", "11")
+
+
+def test_car_market_can_be_overridden(tmp_path, monkeypatch):
+    disc = make_disc(tmp_path, b"x", volume=b"NA_0900_06A_WESTERN")
+    monkeypatch.setenv("CUP28_CARMARKET", "a0")
+    monkeypatch.setenv("CUP28_CARLANGUAGE", "2")
+    assert cup28.car_market(disc) == ("a0", "02")
+    monkeypatch.setenv("CUP28_CARMARKET", "north america")
+    with pytest.raises(ImageFormatError, match="CUP28_CARMARKET"):
+        cup28.car_market(disc)
+
+
+def test_european_disc_puts_the_unit_in_a_european_car(tmp_path, monkeypatch):
+    monkeypatch.delenv("CUP28_CARMARKET", raising=False)
+    monkeypatch.delenv("CUP28_CARLANGUAGE", raising=False)
+    (tmp_path / "eu").mkdir()
+    disc = make_disc(tmp_path / "eu", make_loading(), volume=b"EU_0800_04A_WESTERN")
+    unit, qemu = tmp_path / "unit", tmp_path / "qemu-system-sh4"
+    qemu.touch()
+    monkeypatch.setattr(cup28, "first_power_on", lambda *a, **k: True)
+    command = []
+    monkeypatch.setattr(cli.os, "execv", lambda path, argv: command.extend(argv))
+    cli.main(["boot", "--model", "cup28", "--disc", str(disc), "--unit",
+              str(unit), "--qemu", str(qemu), "--display", "none"])
+    machine = command[command.index("-M") + 1]
+    assert "carmarket=04,carlanguage=00" in machine
+
+
+def test_new_unit_gets_one_setup_boot(tmp_path, monkeypatch):
+    """A unit whose flash the guest has not written is powered on once
+    headless, so the first boot a window opens on is already regionalised."""
+    calls = []
+    monkeypatch.setattr(cup28, "first_power_on",
+                        lambda unit, media, **k: calls.append(media) or True)
+    disc = make_disc(tmp_path / "na", make_loading())
+    unit, qemu = tmp_path / "unit", tmp_path / "qemu-system-sh4"
+    qemu.touch()
+    monkeypatch.setattr(cli.os, "execv", lambda path, argv: None)
+    cli.main(["boot", "--model", "cup28", "--disc", str(disc), "--unit",
+              str(unit), "--qemu", str(qemu), "--display", "none"])
+    assert len(calls) == 1 and calls[0]["carmarket"] == "06"
+
+    # The flash the machine writes: firmware at FIRMWARE_OFFSET, then nothing.
+    firmware = cup28.unit_firmware(unit)
+    assert firmware is not None
+    flash = bytearray(b"\xff" * 0x100000)
+    flash[cup28.FIRMWARE_OFFSET:cup28.FIRMWARE_OFFSET + firmware.stat().st_size] = \
+        firmware.read_bytes()
+    (unit / "flash.bin").write_bytes(flash)
+    assert cup28.flash_written(unit) is False
+    # A guest write after the image settles the unit: no second setup boot.
+    flash[-1] = 0
+    (unit / "flash.bin").write_bytes(flash)
+    assert cup28.flash_written(unit) is True
+    calls.clear()
+    cli.main(["boot", "--model", "cup28", "--disc", str(disc), "--unit",
+              str(unit), "--qemu", str(qemu), "--display", "none"])
+    assert calls == []
 
 
 def test_shipped_scenarios_match_the_cup28_track_format():

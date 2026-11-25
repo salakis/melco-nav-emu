@@ -71,11 +71,15 @@ CUP28_DISC="/path/to/Disc A - Western.iso" make boot MODEL=cup28
 .venv/bin/python -m melco_nav_emu.cli boot --model cup28 --disc "/path/to/Disc A - Western.iso"
 ```
 
-The macOS window is resizable and uses CoreAudio. On a new unit the
-firmware can initially look for European files; let it finish its first
-power-on, close the window, then run the same command again. The guest saves
-the North American market setting supplied over MOST and then uses miles and
-US English guidance.
+The macOS window is resizable and uses CoreAudio. The first run of a new unit
+takes about 15 s longer than later ones: the launcher powers the unit on once,
+headless, and lets it write the flash it sets itself up in
+(`first-power-on.log` in the unit directory, and see "Unit state" below). The
+window then opens on a unit that is already the car its map disc belongs to:
+an `NA_` disc puts it in a North American car, so it uses miles and US English;
+an `EU_` one puts it in a European car, so it uses kilometres and keeps its own
+language (English). See "Market and language" for how that is decided and how
+to force it.
 
 ### Keys
 
@@ -99,6 +103,39 @@ The launcher stores the unit's flash, battery-backed SRAM, and backup EEPROM in
 firmware image `nk-<sha256>.nb0`.
 Set `CUP28_UNIT` to a different directory for a separate unit; `rm -rf` that
 directory for a new one.
+
+A unit that has never been powered on is set up by the guest during its first
+boot: it writes its flash there, and that boot is the only one that cannot yet
+apply the language the car announces (it logs `VPL_DataManager SetLangError`
+three times and keeps its factory default). `boot` spends that boot headless,
+so the first session a window opens on is already set up; the log is
+`first-power-on.log` in the unit directory and the power-on takes about 15 s
+(it ends once the guest's flash has been left alone for 10 s, so it is never
+cut short mid-write).
+
+### Market and language
+
+The car tells the unit which market and language it has, over MOST (market in
+`F5/2B2`, language in `F5/2C1`); the unit uses them for miles or kilometres,
+for its menus and for its guidance voice, and it keeps them. The disc in the
+drive decides which car that is, by its volume name: `NA_…` sets market `06`
+(North America) and language `11` (US English), so the unit uses miles; `EU_…`
+sets market `04` (Europe) and announces no language, so the unit keeps its own
+factory language (UK English) and uses kilometres; any other name keeps the
+tested North American pair. Either byte can be forced:
+
+```sh
+CUP28_CARMARKET=04 CUP28_CARLANGUAGE=01 make boot MODEL=cup28 CUP28_DISC=...
+```
+
+`CUP28_CARLANGUAGE=00` is how to ask for "the car states no language". The
+codes measured on the North American disc, by which language the unit's menus
+come up in: `01` Swedish, `02` Danish, `11` English (US); the unit's own
+default is English (UK).
+
+The guest applies a change at its *next* power-on: it persists what it parsed
+and starts up with it, so a unit given a disc of the other market shows the new
+region and language from the second run on that disc.
 
 ### Drive replay (GPS and vehicle sensors)
 
@@ -318,6 +355,8 @@ A scenario directory holds:
 |---|---|---|
 | `CUP28_DISC` / `--disc` | CUP28 | map DVD ISO |
 | `CUP28_UNIT` / `--unit` | CUP28 | unit state directory (default `build/cup28`) |
+| `CUP28_CARMARKET=<hex>` | CUP28 | market the car announces over MOST (`carmarket=`, default from the disc's volume name: `06` North America, `04` Europe) |
+| `CUP28_CARLANGUAGE=<hex>` | CUP28 | language the car announces over MOST (`carlanguage=`; default from the disc: `11` US English for `NA_…`, `00` (states none, the unit keeps its own) for `EU_…`) |
 | `--track` | CUP28 | drive-replay sensor CSV (`gpstrack=`) |
 | `--display`, `--audio`, `--qmp` | CUP28 | QEMU display backend, audio backend (`none` to disable), QMP socket |
 | `CUP2006_DISC1` / `CUP2006_DISC2` | CU-P2006 | disc ISO paths |
