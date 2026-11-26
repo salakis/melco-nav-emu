@@ -1,0 +1,191 @@
+Subject: [PATCH 0017] sh4: trace MBX interrupt delivery from source to CPU
+
+# melco-nav-emu core patch (diagnostic, trace-only).
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (c) 2026 melco-nav-emu contributors
+# Modifies GPL-licensed QEMU sources; applied by scripts/qemu.sh.
+
+The board trace shows the MBX1 model's line and its own register state, but
+not the SH INTC source's asserted/pending bookkeeping at that moment, nor
+whether the CPU sampled the request before the level fell.  Add trace events,
+with no change to behaviour:
+
+  sh_intc_mbx_query    the MBX source's asserted/pending/priority/enabled
+                       state at every sh_intc_get_pending_vector() call that
+                       sees it pending, including calls that return -1 because
+                       IMASK outranks it;
+  sh_intc_mbx_deliver  the SR/IMASK/BL decision and the vector the CPU takes
+                       (or declines) when the MBX source is pending;
+  cup2006_mbx_*        the board's sense/update/ack lines, putting the
+                       requested model level, computed active value, cached
+                       edge and INTC source state on one timeline.
+
+All are inert unless -trace enables them.  Rate limits bound a masked spin:
+32 query samples then every 1024th, and 64 delivery samples then every 4096th.
+--- a/hw/intc/trace-events
++++ b/hw/intc/trace-events
+@@ -337,6 +337,8 @@
+ sh_intc_read(unsigned size, uint64_t offset, unsigned long val) "size %u 0x%" PRIx64 " -> 0x%lx"
+ sh_intc_write(unsigned size, uint64_t offset, unsigned long val) "size %u 0x%" PRIx64 " <- 0x%lx"
+ sh_intc_set(int id, int enable) "setting interrupt group %d to %d"
++sh_intc_mbx_query(int a0, int a1, int a2, int a3, int a4, int a5, int a6, int a7) "sh_intc: MBX query n=%d imask=%d parent=%d src{asserted=%d pending=%d prio=%d chosen=0x%03x} enabled=%d"
++sh_intc_mbx_deliver(int a0, int a1, unsigned a2, unsigned a3, unsigned a4, unsigned a5, int a6) "sh4: MBX deliver taken=%d vector=0x%03x pc=0x%08x sr=0x%08x spc=0x%08x sleep=%d imask=%d"
+ 
+ # loongson_ipi.c
+ loongson_ipi_read(unsigned size, uint64_t addr, uint64_t val) "size: %u addr: 0x%"PRIx64 "val: 0x%"PRIx64
+--- a/hw/intc/sh_intc.c
++++ b/hw/intc/sh_intc.c
+@@ -85,6 +85,8 @@
+     unsigned int i;
+     int best = -1;
+     int best_prio = -1;
++    int mbx_asserted = 0, mbx_pending = 0, mbx_prio = -1, mbx_enabled = 0;
++    static unsigned mbx_queries;
+ 
+     /* slow: use a linked lists of pending sources instead */
+     /*
+@@ -96,6 +98,12 @@
+     for (i = 0; i < desc->nr_sources; i++) {
+         struct intc_source *source = &desc->sources[i];
+ 
++        if (source->vect == 0x900) {
++            mbx_asserted = source->asserted;
++            mbx_pending = source->pending;
++            mbx_prio = source->prio;
++            mbx_enabled = source->enable_count == source->enable_max;
++        }
+         if (!source->pending || !source->vect) {
+             continue;
+         }
+@@ -108,14 +116,66 @@
+         }
+     }
+ 
++    /*
++     * Diagnostic: the MBX source's state at every mask decision, including
++     * the ones where it is pending but its priority loses to IMASK and the
++     * function returns -1.  Bounded so a long masked spin cannot flood.
++     */
++    if (mbx_pending || (best >= 0 && desc->sources[best].vect == 0x900)) {
++        if (mbx_queries < 32 || (mbx_queries & 0x3ff) == 0) {
++            trace_sh_intc_mbx_query(mbx_queries, imask, desc->pending,
++                                    mbx_asserted, mbx_pending, mbx_prio,
++                                    best >= 0 ? desc->sources[best].vect : 0,
++                                    mbx_enabled);
++        }
++        mbx_queries++;
++    }
++
+     if (best < 0) {
+         return -1;
+     }
+ 
+     trace_sh_intc_pending(desc->pending, desc->sources[best].vect);
+     return desc->sources[best].vect;
++}
++
++/*
++ * Diagnostic probes for the INTEVT 0x900 line's CPU side.  Trace-only: the
++ * helpers report state and change nothing.
++ */
++bool sh_intc_source_pending(struct intc_desc *desc, unsigned short vect)
++{
++    unsigned int i;
++
++    if (!desc) {
++        return false;
++    }
++    for (i = 0; i < desc->nr_sources; i++) {
++        if (desc->sources[i].vect == vect && desc->sources[i].pending) {
++            return true;
++        }
++    }
++    return false;
+ }
+ 
++void sh_intc_trace_mbx_deliver(struct intc_desc *desc, int taken, int vector,
++                               uint32_t pc, uint32_t sr, uint32_t spc,
++                               int in_sleep)
++{
++    static unsigned mbx_attempts;
++
++    if (vector != 0x900 && !sh_intc_source_pending(desc, 0x900)) {
++        return;
++    }
++    if (mbx_attempts >= 64 && (mbx_attempts & 0xfff) != 0) {
++        mbx_attempts++;
++        return;
++    }
++    mbx_attempts++;
++    trace_sh_intc_mbx_deliver(taken, vector < 0 ? 0 : vector, pc, sr, spc,
++                              in_sleep, (sr >> 4) & 0xf);
++}
++
+ typedef enum {
+     INTC_MODE_NONE,
+     INTC_MODE_DUAL_SET,
+--- a/include/hw/sh4/sh_intc.h
++++ b/include/hw/sh4/sh_intc.h
+@@ -60,6 +60,12 @@
+ 
+ int sh_intc_get_pending_vector(struct intc_desc *desc, int imask);
+ 
++/* Diagnostics: read-only state probes, no behaviour. */
++bool sh_intc_source_pending(struct intc_desc *desc, unsigned short vect);
++void sh_intc_trace_mbx_deliver(struct intc_desc *desc, int taken, int vector,
++                               uint32_t pc, uint32_t sr, uint32_t spc,
++                               int in_sleep);
++
+ void sh_intc_toggle_source(struct intc_source *source,
+                            int enable_adj, int assert_adj);
+ 
+--- a/hw/sh4/trace-events
++++ b/hw/sh4/trace-events
+@@ -36,6 +36,10 @@
+ cup2006_du_stub_mbx_register_size(uint32_t a0, const char * a1, unsigned a2, uint64_t a3, unsigned a4) "cup2006: STUB mbx register 0x%08" PRIx32 " (%s, size=%u) value=0x%" PRIx64 "; +0x%03x reads the model status word (0 while idle)"
+ cup2006_du_mbx_intevt_raised_why(unsigned a0, uint64_t a1, const char * a2, unsigned a3, unsigned a4, unsigned a5, int64_t a6) "cup2006: MBX INTEVT 0x%03x raised #%" PRIu64 " why=%s status=0x%08x enable=0x%08x pc=0x%08x t=%" PRId64 "ms"
+ cup2006_du_mbx_intevt_released_why(unsigned a0, uint64_t a1, const char * a2, unsigned a3, unsigned a4, int64_t a5) "cup2006: MBX INTEVT 0x%03x released #%" PRIu64 " why=%s status=0x%08x pc=0x%08x t=%" PRId64 "ms"
++cup2006_mbx_line_in(const char * a0, int a1, unsigned a2, unsigned a3, unsigned a4, int a5, int a6, int a7, int a8, int a9) "cup2006: MBX in why=%s req=%d status=0x%08x enable=0x%08x active=0x%08x cached=%d src{asserted=%d pending=%d en=%d/%d}"
++cup2006_mbx_line_out(const char * a0, int a1, int a2, int a3, int a4, int a5, unsigned a6, int64_t a7) "cup2006: MBX out why=%s toggle=%d src{asserted=%d pending=%d en=%d/%d} pc=0x%08x t=%" PRId64 "ns"
++cup2006_mbx_reg(const char * a0, unsigned a1, unsigned a2, unsigned a3, unsigned a4, unsigned a5, int a6, int a7, unsigned a8, int64_t a9) "cup2006: MBX reg %s off=0x%03x value=0x%08x status=0x%08x enable=0x%08x active=0x%08x src{asserted=%d pending=%d} pc=0x%08x t=%" PRId64 "ns"
++cup2006_mbx_ack(int a0, int a1, int a2, int a3, int a4, int a5, unsigned a6, int64_t a7) "cup2006: MBX INTC2 ack bit=%d src{asserted %d->%d pending %d->%d} toggle=%d pc=0x%08x t=%" PRId64 "ns"
+ cup2006_du_mbx_status_x12c_done(unsigned a0, unsigned a1, uint64_t a2) "cup2006: mbx status +0x12c done read pc=0x%08x value=0x%08x n=%" PRIu64 ""
+ cup2006_du_dppr(unsigned a0) "cup2006: DU DPPR=0x%08x"
+ cup2006_du_graphic_console_active_area(int a0, int a1) "cup2006: DU graphic console 0: %dx%d active area (SH7785-compatible DU scan-out)"
+--- a/target/sh4/helper.c
++++ b/target/sh4/helper.c
+@@ -71,6 +71,7 @@
+     int do_irq = cpu_test_interrupt(cs, CPU_INTERRUPT_HARD);
+     int do_exp, irq_vector = cs->exception_index;
+     uint64_t last_pc = env->pc;
++    uint32_t sr_in = env->sr;
+ 
+     /* prioritize exceptions over interrupts */
+ 
+@@ -89,6 +90,8 @@
+             return false;
+         }
+         if (do_irq && !env->in_sleep) {
++            sh_intc_trace_mbx_deliver(env->intc_handle, 0, -1, last_pc,
++                                      sr_in, env->spc, env->in_sleep);
+             return false; /* masked */
+         }
+     }
+@@ -100,6 +103,8 @@
+         irq_vector = sh_intc_get_pending_vector(env->intc_handle,
+                                                 (env->sr >> 4) & 0xf);
+         if (irq_vector == -1) {
++            sh_intc_trace_mbx_deliver(env->intc_handle, 0, -1, last_pc,
++                                      sr_in, env->spc, env->in_sleep);
+             return false; /* masked */
+         }
+     }
+@@ -196,6 +201,8 @@
+     if (do_irq) {
+         env->intevt = irq_vector;
+         env->pc = env->vbr + 0x600;
++        sh_intc_trace_mbx_deliver(env->intc_handle, 1, irq_vector, last_pc,
++                                  sr_in, env->spc, 0);
+         qemu_plugin_vcpu_interrupt_cb(cs, last_pc);
+         return true;
+     }

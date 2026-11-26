@@ -77,33 +77,316 @@ void cup2006_mbx_note(Cup2006MachineState *s, hwaddr phys,
  */
 static uint32_t cup2006_mbx_active_status(Cup2006MachineState *s)
 {
-    /* STUB: a mask, not the enable the hardware has - see above. */
     uint32_t mask = s->mbx_window[CUP2006_MBX_ENABLE >> 2] & 0xffff;
 
+    if (s->mbx_sense != CUP2006_MBX_SENSE_MASK) {
+        /* Experiment only: +0x130 read as the hardware's enable. */
+        uint32_t active = s->mbx_status & mask & 0x7fff;
+
+        if (s->mbx_sense == CUP2006_MBX_SENSE_ENABLE_NOMASTER) {
+            return active;
+        }
+        return (mask & 0x8000) ? active : 0;
+    }
+    /* STUB: a mask, not the enable the hardware has - see above. */
     return s->mbx_status & ~mask & 0xffff & ~CUP2006_MBX_ST_POLLED;
 }
 
-void cup2006_mbx_update_irq(Cup2006MachineState *s, const char *why)
+/*
+ * Diagnostic access log for the three interrupt registers, both senses and
+ * both models: one line per raw +0x12C/+0x130/+0x134 guest access.  A trace
+ * event with no enabled backend does nothing.
+ */
+void cup2006_mbx_trace_reg(Cup2006MachineState *s, const char *dir, hwaddr off,
+                           uint64_t value)
+{
+    struct intc_source *src;
+
+    if (off != CUP2006_MBX_STATUS && off != CUP2006_MBX_ENABLE &&
+        off != CUP2006_MBX_STATUS_ACK) {
+        return;
+    }
+    src = s->disp_intc_src[2];
+    trace_cup2006_mbx_reg(dir, (uint32_t)off, (uint32_t)value,
+                          s->mbx_status,
+                          s->mbx_window[CUP2006_MBX_ENABLE >> 2] & 0xffff,
+                          cup2006_mbx_active_status(s),
+                          src ? src->asserted : 0, src ? src->pending : 0,
+                          cup2006_guest_pc(),
+                          qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL));
+}
+
+void cup2006_mbx_update_irq(Cup2006MachineState *s, const char *why, int req)
 {
     struct intc_source *src = s->disp_intc_src[2];   /* INTEVT 0x900 */
     uint32_t active = cup2006_mbx_active_status(s);
     bool now = active != 0;
+    int toggle = 0;
 
     if (!src) {
         return;
     }
+    trace_cup2006_mbx_line_in(why, req, s->mbx_status,
+                              s->mbx_window[CUP2006_MBX_ENABLE >> 2] & 0xffff,
+                              active, s->mbx_irq_active,
+                              src->asserted, src->pending,
+                              src->enable_count, src->enable_max);
     if (now && !s->mbx_irq_active) {
-        sh_intc_toggle_source(src, 0, 1);
-        s->mbx_irq_raises++;
-        trace_cup2006_du_mbx_intevt_raised_why(CUP2006_DISP_INTEVT_MBX, s->mbx_irq_raises, why, s->mbx_status, s->mbx_window[CUP2006_MBX_ENABLE >> 2] & 0xffff, cup2006_guest_pc(), qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+        /*
+         * Diagnostic "late-first" only: the model's line is up before the
+         * kick's +0x130 disarm, so under the enable read the render request
+         * is delivered inside the kick.  Withhold that delivery so the
+         * boundary pulse is the guest's first one; the source stays
+         * deasserted and mbx_irq_active goes true below, exactly as if the
+         * assert had happened.
+         */
+        bool hold = s->mbx_redeliver == CUP2006_MBX_REDELIVER_LATE_FIRST &&
+                    s->mbx_sense != CUP2006_MBX_SENSE_MASK &&
+                    (s->mbx_status & CUP2006_MBX_STATUS_DONE) &&
+                    ((s->mbx_window[CUP2006_MBX_ENABLE >> 2] &
+                      CUP2006_MBX_LATE_ARM) == CUP2006_MBX_LATE_ARM);
+        /*
+         * Diagnostic only (CUP2006_MBX_EVM_QUIET), off by default: withhold
+         * the delivery of a standalone completion request - pending status is
+         * bit 6 and nothing else - for the first one, or the first two.  The
+         * model's line assertion is the requested level, so this needs
+         * req == 1; the budget counts withheld requests, and the latched
+         * "held" flag stops one request being counted twice.  Nothing the
+         * guest can read changes: status, enable and W1C are untouched and
+         * the poll still sees the bit.
+         */
+        bool quiet = s->mbx_evm_quiet != CUP2006_MBX_EVM_QUIET_OFF &&
+                     s->mbx3d && req == 1 &&
+                     s->mbx_sense != CUP2006_MBX_SENSE_MASK &&
+                     !s->mbx_evm_quiet_held &&
+                     (s->mbx_status & 0x7fff) == CUP2006_MBX_EVM_QUIET_STATUS &&
+                     s->mbx_evm_quiet_count <
+                         (uint64_t)s->mbx_evm_quiet;
+
+        if (!hold && !quiet) {
+            sh_intc_toggle_source(src, 0, 1);
+            toggle = 1;
+            s->mbx_irq_raises++;
+        }
+        /* A new 0 -> 1 edge re-arms the one-shot candidate below. */
+        s->mbx_redeliver_done = false;
+        /*
+         * Diagnostic late-boundary bookkeeping: remember a raise that
+         * carries the render-done status, so that its INTC2 acknowledge can
+         * arm the forced wake pulse in cup2006_mbx_late_boundary().  The
+         * test reads device status bits only, never the guest's PC.
+         */
+        if (s->mbx_status & CUP2006_MBX_STATUS_DONE) {
+            s->mbx_late_raised = true;
+            s->mbx_late_acked = false;
+            s->mbx_late_pulse_up = false;
+        }
+        if (hold) {
+            s->mbx_late_held = true;
+            trace_cup2006_mbx_redeliver(s->mbx_redeliver, 0, active,
+                                        s->mbx_status,
+                                        s->mbx_window[CUP2006_MBX_ENABLE >> 2] & 0xffff,
+                                        src->asserted, src->pending,
+                                        s->mbx_late_pulses,
+                                        cup2006_guest_pc(),
+                                        qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL));
+        } else if (quiet) {
+            /*
+             * One line per withheld request, carrying the raw status, the
+             * computed active value and the ordinal; the line_in above it in
+             * the same call carries the requested level (req=1) and the
+             * cached edge state.  Mode 10 + ordinal marks it as this filter,
+             * so it cannot be read as one of the redeliver modes.
+             */
+            s->mbx_evm_quiet_count++;
+            s->mbx_evm_quiet_held = true;
+            trace_cup2006_mbx_redeliver(CUP2006_MBX_EVM_QUIET_TRACE +
+                                        (int)s->mbx_evm_quiet_count, 0, active,
+                                        s->mbx_status,
+                                        s->mbx_window[CUP2006_MBX_ENABLE >> 2] & 0xffff,
+                                        src->asserted, src->pending,
+                                        s->mbx_evm_quiet_count,
+                                        cup2006_guest_pc(),
+                                        qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL));
+        } else {
+            s->mbx_late_held = false;
+            s->mbx_evm_quiet_held = false;
+            trace_cup2006_du_mbx_intevt_raised_why(CUP2006_DISP_INTEVT_MBX, s->mbx_irq_raises, why, s->mbx_status, s->mbx_window[CUP2006_MBX_ENABLE >> 2] & 0xffff, cup2006_guest_pc(), qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
+        }
     } else if (!now && s->mbx_irq_active) {
         if (src->asserted) {
             sh_intc_toggle_source(src, 0, -1);
+            toggle = -1;
         }
         s->mbx_irq_drops++;
+        /* The withheld request's own drop ends the latch: a later 0 -> 1
+         * edge of the line is a different request. */
+        s->mbx_evm_quiet_held = false;
         trace_cup2006_du_mbx_intevt_released_why(CUP2006_DISP_INTEVT_MBX, s->mbx_irq_drops, why, s->mbx_status, cup2006_guest_pc(), qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL));
     }
     s->mbx_irq_active = now;
+    trace_cup2006_mbx_line_out(why, toggle, src->asserted, src->pending,
+                               src->enable_count, src->enable_max,
+                               cup2006_guest_pc(),
+                               qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL));
+}
+
+/*
+ * Candidate, off by default (CUP2006_MBX_REDELIVER).  The INTC2 acknowledge
+ * deasserts this source on its own while the MBX line can still be up: the
+ * model only calls back on a level change, so that acknowledge is the last
+ * event the controller sees for a request that is still pending.  Re-assert
+ * the source there - "once" for each 0 -> 1 edge of the line, "always" on
+ * every acknowledge, bounded, to show what the unbounded rule does.
+ *
+ * W1C stays the guest's: +0x134 clearing the status drops the line, the model
+ * calls back, and the 0 -> 1 re-arm in cup2006_mbx_update_irq() resets the
+ * one-shot.  A request the guest never clears keeps the line up, so "once"
+ * delivers it exactly twice and then holds, instead of spinning.
+ *
+ * "late" does not re-send here at all: it only notes that the raise really was
+ * acknowledged by INTC2, which is the precondition for the forced pulse in
+ * cup2006_mbx_late_boundary(), and consumes that pulse if it is out.
+ */
+void cup2006_mbx_ack_redeliver(Cup2006MachineState *s, int was_asserted)
+{
+    struct intc_source *src = s->disp_intc_src[2];
+    uint32_t active = cup2006_mbx_active_status(s);
+    uint32_t enable = s->mbx_window[CUP2006_MBX_ENABLE >> 2] & 0xffff;
+    int sent = 0;
+
+    if (s->mbx_redeliver == CUP2006_MBX_REDELIVER_OFF || !src) {
+        return;
+    }
+    if (s->mbx_redeliver >= CUP2006_MBX_REDELIVER_LATE) {
+        /*
+         * The forced pulse is consumed by the acknowledge that deasserts
+         * it, and a request counts as acknowledged only if this write
+         * really took the source down: a stray ack of a source that was
+         * not asserted must not arm the boundary test.
+         */
+        if (was_asserted) {
+            s->mbx_late_pulse_up = false;
+            if (s->mbx_late_raised && !s->mbx_late_acked) {
+                s->mbx_late_acked = true;
+            }
+        }
+        if (s->mbx_late_logged < CUP2006_MBX_LATE_LOG ||
+            (s->mbx_late_logged & 0xff) == 0) {
+            s->mbx_late_logged++;
+            trace_cup2006_mbx_redeliver(s->mbx_redeliver, sent, active,
+                                        s->mbx_status, enable, src->asserted,
+                                        src->pending, s->mbx_late_pulses,
+                                        cup2006_guest_pc(),
+                                        qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL));
+        }
+        return;
+    }
+    /*
+     * The line down, or nothing outstanding: nothing to re-send.  The
+     * request, once the guest clears it through +0x134, drops the line and
+     * the model calls back, which re-arms the one-shot below.
+     */
+    if (s->mbx_irq_active && active) {
+        bool held = s->mbx_redeliver == CUP2006_MBX_REDELIVER_ONCE &&
+                    s->mbx_redeliver_done;
+
+        if (!held && s->mbx_redeliver == CUP2006_MBX_REDELIVER_ALWAYS &&
+            s->mbx_redeliver_count >= CUP2006_MBX_REDELIVER_BOUND) {
+            held = true;
+        }
+        if (!held) {
+            sh_intc_toggle_source(src, 0, 1);
+            s->mbx_redeliver_done = true;
+            s->mbx_redeliver_count++;
+            sent = 1;
+        }
+    }
+    trace_cup2006_mbx_redeliver(s->mbx_redeliver, sent, active,
+                                s->mbx_status, enable, src->asserted,
+                                src->pending, s->mbx_redeliver_count,
+                                cup2006_guest_pc(),
+                                qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL));
+}
+
+/*
+ * Diagnostic only (CUP2006_MBX_REDELIVER=late), not a hardware fix.  The
+ * guest kicks a render at +0x680, the model raises 0x900, the guest
+ * acknowledges it, and then the kick's own +0x130 update clears bits 2, 6 and
+ * 15 - which, under the model's INT_ENABLE reading, is the write that drops
+ * the line, leaving the driver to wait for the interrupt it just disarmed.
+ *
+ * Called after that write has landed (both backends call it from the point
+ * where the write's own level callbacks have already run), it deliberately
+ * asserts the 0x900 source even though the model's active status has just
+ * gone to zero.  Conditions, all from device registers and the controller's
+ * own raise/ack bookkeeping - never the PC, never a timer, and W1C is left
+ * alone:
+ *
+ *   - the write did the kick's 0xFFFF -> 0x7FBB transition of +0x130;
+ *   - a 0x900 raise that carried the render-done bit was acknowledged by
+ *     INTC2 (so this is a request the guest has seen and taken);
+ *   - the completion bit is still set in +0x12C (still owed to the guest);
+ *   - one pulse per request: the triggered flag is consumed here, and the
+ *     outstanding pulse is consumed by its acknowledge.
+ *
+ * "late-first" relaxes only the second bullet, because it withheld that
+ * raise: the pulse then stands in for the delivery the model would have made
+ * before the disarm, and is still one per request.  It exists to answer the
+ * question this measurement raised - whether the boundary can carry the
+ * request's *first* delivery - not to propose a delivery rule.
+ */
+void cup2006_mbx_late_boundary(Cup2006MachineState *s, uint32_t old_enable,
+                               uint32_t new_enable)
+{
+    struct intc_source *src = s->disp_intc_src[2];
+    uint32_t active = cup2006_mbx_active_status(s);
+    int sent = 0;
+
+    bool late_first = s->mbx_redeliver == CUP2006_MBX_REDELIVER_LATE_FIRST;
+
+    if (s->mbx_redeliver != CUP2006_MBX_REDELIVER_LATE && !late_first) {
+        return;
+    }
+    if ((old_enable & CUP2006_MBX_LATE_ARM) != CUP2006_MBX_LATE_ARM ||
+        (new_enable & CUP2006_MBX_LATE_ARM) != 0) {
+        return;
+    }
+    /*
+     * Enable sense only: the experiment asks what delivery after the disarm
+     * does to a guest waiting under the model's INT_ENABLE reading.  The
+     * shipped mask reading is not touched, so nb-a/nb-b stay reproduced.
+     */
+    if (s->mbx_sense != CUP2006_MBX_SENSE_MASK &&
+        (late_first ? s->mbx_late_held
+                    : s->mbx_late_raised && s->mbx_late_acked) &&
+        !s->mbx_late_pulse_up &&
+        (s->mbx_status & CUP2006_MBX_STATUS_DONE)) {
+        sh_intc_toggle_source(src, 0, 1);
+        s->mbx_late_pulse_up = true;
+        /* One pulse per request: this raise is spent, its ack consumes the
+         * pulse.  A later frame raises again and re-arms the test. */
+        s->mbx_late_raised = false;
+        s->mbx_late_held = false;
+        s->mbx_late_pulses++;
+        /*
+         * Hold the cached line state with the forced assert: it is what
+         * stops a synchronous model callback (the guest's own +0x130 write
+         * inside the service routine) from toggling the source a second
+         * time for the same request.
+         */
+        s->mbx_irq_active = true;
+        sent = 1;
+    }
+    if (s->mbx_late_logged < CUP2006_MBX_LATE_LOG ||
+        (s->mbx_late_logged & 0xff) == 0) {
+        s->mbx_late_logged++;
+        trace_cup2006_mbx_redeliver(s->mbx_redeliver, sent, active,
+                                    s->mbx_status, new_enable & 0xffff, src->asserted,
+                                    src->pending, s->mbx_late_pulses,
+                                    cup2006_guest_pc(),
+                                    qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL));
+    }
 }
 
 uint64_t cup2006_mbx_read(Cup2006MachineState *s, hwaddr base,
@@ -123,6 +406,7 @@ uint64_t cup2006_mbx_read(Cup2006MachineState *s, hwaddr base,
     if (s->mbx3d) {
         value = cup2006_mbx3d_read(s, off, size);
         cup2006_mbx_note(s, phys, false, size, value);
+        cup2006_mbx_trace_reg(s, "read", off, value);
         return value;
     }
 
@@ -157,7 +441,7 @@ uint64_t cup2006_mbx_read(Cup2006MachineState *s, hwaddr base,
     if (mbx_status_bits) {
         /* A status bit set by a read is a 0 -> 1 transition like any other,
          * so it must move the 0x900 line. */
-        cup2006_mbx_update_irq(s, "x12c-status-read");
+        cup2006_mbx_update_irq(s, "x12c-status-read", -1);
     }
     if (off == CUP2006_MBX_STATUS) {
         value = s->mbx_status >> shift;
@@ -171,6 +455,7 @@ uint64_t cup2006_mbx_read(Cup2006MachineState *s, hwaddr base,
     }
     value &= size == 4 ? 0xffffffffu : ((1u << (size * 8)) - 1);
     cup2006_mbx_note(s, phys, false, size, value);
+    cup2006_mbx_trace_reg(s, "read", off, value);
     qemu_log_mask(LOG_GUEST_ERROR,
                   "cup2006: mbx read pc=0x%08" PRIx32
                   " addr=0x%08" HWADDR_PRIx " size=%u value=0x%" PRIx64 "\n",

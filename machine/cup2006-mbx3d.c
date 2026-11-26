@@ -99,7 +99,7 @@ static void cup2006_mbx3d_irq(void *opaque, int level)
     trace_cup2006_mbx3d_irq(level, s->mbx_status,
                             s->mbx_window[CUP2006_MBX_ENABLE >> 2],
                             cup2006_guest_pc());
-    cup2006_mbx_update_irq(s, level ? "mbx3d" : "mbx3d-drop");
+    cup2006_mbx_update_irq(s, level ? "mbx3d" : "mbx3d-drop", level);
 }
 
 static void cup2006_mbx3d_log(void *opaque, const char *line)

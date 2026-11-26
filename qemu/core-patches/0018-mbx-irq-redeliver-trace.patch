@@ -1,0 +1,21 @@
+Subject: [PATCH 0018] sh4: trace the MBX 0x900 re-delivery candidate
+
+# melco-nav-emu core patch (diagnostic, trace-only).
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (c) 2026 melco-nav-emu contributors
+# Modifies GPL-licensed QEMU sources; applied by scripts/qemu.sh.
+
+The board-side candidate in machine/cup2006-du.c
+(cup2006_mbx_ack_redeliver(), off unless CUP2006_MBX_REDELIVER is set) needs one
+line per decision: whether the re-assert was driven or held back, with the model
+status/enable, the INTC source's asserted/pending state and the running counts.
+Behaviour is unchanged; a backend that does not enable the event sees nothing.
+--- a/hw/sh4/trace-events
++++ b/hw/sh4/trace-events
+@@ -41,5 +41,6 @@
+ cup2006_mbx_reg(const char * a0, unsigned a1, unsigned a2, unsigned a3, unsigned a4, unsigned a5, int a6, int a7, unsigned a8, int64_t a9) "cup2006: MBX reg %s off=0x%03x value=0x%08x status=0x%08x enable=0x%08x active=0x%08x src{asserted=%d pending=%d} pc=0x%08x t=%" PRId64 "ns"
+ cup2006_mbx_ack(int a0, int a1, int a2, int a3, int a4, int a5, unsigned a6, int64_t a7) "cup2006: MBX INTC2 ack bit=%d src{asserted %d->%d pending %d->%d} toggle=%d pc=0x%08x t=%" PRId64 "ns"
+ cup2006_du_mbx_status_x12c_done(unsigned a0, unsigned a1, uint64_t a2) "cup2006: mbx status +0x12c done read pc=0x%08x value=0x%08x n=%" PRIu64 ""
++cup2006_mbx_redeliver(int a0, int a1, unsigned a2, unsigned a3, unsigned a4, int a5, int a6, uint64_t a7, unsigned a8, int64_t a9) "cup2006: MBX redeliver mode=%d sent=%d active=0x%08x status=0x%08x enable=0x%08x src{asserted=%d pending=%d} n=%" PRIu64 " pc=0x%08x t=%" PRId64 "ns"
+ cup2006_du_dppr(unsigned a0) "cup2006: DU DPPR=0x%08x"
+ cup2006_du_graphic_console_active_area(int a0, int a1) "cup2006: DU graphic console 0: %dx%d active area (SH7785-compatible DU scan-out)"

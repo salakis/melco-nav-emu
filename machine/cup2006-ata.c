@@ -418,14 +418,34 @@ void cup2006_intc2_write_at(Cup2006MachineState *s, hwaddr addr,
          * bit deasserts its model source: one pulse, one interrupt.
         */
         for (i = 0; i < CUP2006_DISP_LINES; i++) {
+            struct intc_source *src = s->disp_intc_src[i];
+            int was_asserted = src ? src->asserted : 0;
+            int was_pending = src ? src->pending : 0;
+            int toggled = 0;
+
             if (!(val & cup2006_disp_ack_bit[i])) {
                 continue;
             }
             s->disp_ack[i]++;
-            if (s->disp_intc_src[i] && s->disp_intc_src[i]->asserted) {
-                sh_intc_toggle_source(s->disp_intc_src[i], 0, -1);
+            if (src && src->asserted) {
+                sh_intc_toggle_source(src, 0, -1);
+                toggled = -1;
             }
             *slot &= ~cup2006_disp_ack_bit[i];
+            if (i == 2) {
+                trace_cup2006_mbx_ack(1, was_asserted,
+                                      src ? src->asserted : 0,
+                                      was_pending, src ? src->pending : 0,
+                                      toggled, cup2006_guest_pc(),
+                                      qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL));
+                /*
+                 * Candidate only (CUP2006_MBX_REDELIVER, off by default):
+                 * the acknowledge is the last event the controller gets
+                 * while the device line is still up.  See
+                 * cup2006_mbx_ack_redeliver().
+                 */
+                cup2006_mbx_ack_redeliver(s, was_asserted);
+            }
         }
     } else if (off == CUP2006_INTC2_ENABLE_OFF) {
         /*

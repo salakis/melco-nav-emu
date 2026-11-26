@@ -134,6 +134,74 @@ OBJECT_DECLARE_SIMPLE_TYPE(Cup2006MachineState, CUP2006_MACHINE)
 #define CUP2006_MBX_ST_POLLED    (CUP2006_MBX_ST_TA_KICK | CUP2006_MBX_ST_TA_DONE)
 #define CUP2006_MBX_RENDER_START 0x00000680
 /*
+ * Diagnostic sense selection (CUP2006_MBX_SENSE): the shipped reading is a
+ * mask, the two others are the hardware's enable, with and without the
+ * master-bit gate.  The default is the shipped value.
+ */
+#define CUP2006_MBX_SENSE_MASK            0
+#define CUP2006_MBX_SENSE_ENABLE          1
+#define CUP2006_MBX_SENSE_ENABLE_NOMASTER 2
+/*
+ * Diagnostic candidate (CUP2006_MBX_REDELIVER), off by default: after the
+ * INTC2 acknowledge has deasserted the 0x900 source, re-assert it while the
+ * device line is still up.  "once" re-asserts at most once per 0->1 edge of
+ * the line, "always" on every acknowledge (bounded) to show the re-entry the
+ * unbounded rule produces.
+ *
+ * "late" is a third, diagnostic-only variant and is NOT a hardware fix: it
+ * puts the re-assert on the far side of the guest's +0x130 write instead of
+ * on the acknowledge (`once`/`always` both fire before the driver's disarm,
+ * so neither can test what happens after it).  Under the model's INT_ENABLE
+ * reading the kick's post-write clears bits 2, 6 and 15 and that is the
+ * write which drops the line, so no acknowledged request can ever reach the
+ * wait that follows.  "late" asserts the 0x900 source anyway - deliberately
+ * bypassing the model's disabled condition - when that write has just done
+ * the 0xFFFF -> 0x7FBB transition and the completion is still unacknowledged,
+ * and only for a render request the controller actually raised and INTC2
+ * actually acknowledged.  It is evidence for a timing experiment, not a
+ * model of the hardware, and the shipped sense is untouched by it.
+ *
+ * "late-first" is the one focused adjustment of that experiment: the model's
+ * pre-disarm delivery of a render request is withheld, so the boundary pulse
+ * is the guest's *first* delivery of the request instead of a duplicate of an
+ * in-kick one.  Same boundary write, same one-shot rule; still diagnostic.
+ */
+#define CUP2006_MBX_REDELIVER_OFF         0
+#define CUP2006_MBX_REDELIVER_ONCE        1
+#define CUP2006_MBX_REDELIVER_ALWAYS      2
+#define CUP2006_MBX_REDELIVER_LATE        3
+#define CUP2006_MBX_REDELIVER_LATE_FIRST  4
+#define CUP2006_MBX_REDELIVER_BOUND       32
+#define CUP2006_MBX_LATE_ARM              0x00008044  /* +0x130 bits 2, 6, 15 */
+#define CUP2006_MBX_LATE_LOG              64          /* late trace lines */
+/*
+ * Diagnostic only (CUP2006_MBX_EVM_QUIET), off by default: withhold the 0x900
+ * delivery of the first one, or of the first two, *standalone* MBX completion
+ * requests - the ones whose pending status is bit 6 and nothing else (0x40,
+ * param memory ready).  Nothing else matches: the render request carries bits
+ * 2 and 6 (0x4c) and the later TA/context requests carry 0x100 or 0x10, and
+ * the match is on the whole low 15 bits, not on a mask.
+ *
+ * Withholding means only "do not assert this one delivery": the status
+ * register, the enable word and the write-1-to-clear path are the guest's and
+ * are left exactly as the model produced them, so the guest's own poll still
+ * sees the request and can clear it.  The budget counts withheld requests,
+ * not every re-evaluation of the same level, and it is re-armed by the drop
+ * of a withheld request only to clear its own latch.
+ *
+ * It exists to test whether the *delivery* of those early requests, rather
+ * than the requests themselves, is what costs the SYSINTR 26 waiter.  It
+ * needs mbx3d and the enable sense: under the shipped mask reading these
+ * requests never raise the line in the first place, so the switch is inert
+ * there and the shipped default is untouched.
+ */
+#define CUP2006_MBX_EVM_QUIET_OFF           0
+#define CUP2006_MBX_EVM_QUIET_FIRST         1   /* withhold one request */
+#define CUP2006_MBX_EVM_QUIET_BOTH          2   /* withhold the first two */
+#define CUP2006_MBX_EVM_QUIET_STATUS        0x00000040  /* bit 6 alone */
+/* Each withheld request logs cup2006_mbx_redeliver with mode = base + ordinal. */
+#define CUP2006_MBX_EVM_QUIET_TRACE         10
+/*
  * The 8 MiB TA window at 0xFD800000.  Its first half is the TA's input FIFO;
  * the second half is the TA control port, where the firmware writes 1 to end
  * an object and 0 to restart a strip (measured: nothing else ever lands
@@ -776,6 +844,21 @@ struct Cup2006MachineState {
     bool mbx_render_running;        /* render started, bit 2 not delivered */
     uint64_t mbx_irq_raises;        /* status & enable 0 -> 1 edges */
     uint64_t mbx_irq_drops;         /* that edge gone again */
+    int mbx_sense;                  /* CUP2006_MBX_SENSE, shipped = mask */
+    int mbx_redeliver;              /* CUP2006_MBX_REDELIVER, shipped = off */
+    bool mbx_redeliver_done;        /* the current 0->1 edge was re-sent */
+    uint64_t mbx_redeliver_count;   /* re-asserts actually driven */
+    /* Diagnostic late-boundary variant (CUP2006_MBX_REDELIVER=late). */
+    bool mbx_late_raised;           /* a 0x900 raise carried render-done */
+    bool mbx_late_acked;            /* and INTC2 acknowledged that raise */
+    bool mbx_late_pulse_up;         /* the forced pulse is out, not yet acked */
+    bool mbx_late_held;             /* late-first: a pre-disarm delivery was held */
+    uint64_t mbx_late_pulses;       /* forced wake pulses driven */
+    uint64_t mbx_late_logged;       /* late trace lines emitted so far */
+    /* Diagnostic early-request filter (CUP2006_MBX_EVM_QUIET), shipped off. */
+    int mbx_evm_quiet;              /* CUP2006_MBX_EVM_QUIET_* */
+    uint64_t mbx_evm_quiet_count;   /* standalone 0x40 requests withheld */
+    bool mbx_evm_quiet_held;        /* the current such request was withheld */
     /* Storage observability counters: the guest-visible event stream is
      * logged a bounded number of times per kind, with a running summary at
      * power-of-two event counts. */
@@ -872,8 +955,13 @@ void cup2006_intc2_write_at(Cup2006MachineState *s, hwaddr addr, uint64_t value,
 void cup2006_key_pump(void *opaque);
 void cup2006_mbx_note(Cup2006MachineState *s, hwaddr phys, bool is_write, unsigned size, uint64_t value);
 uint64_t cup2006_mbx_read(Cup2006MachineState *s, hwaddr base, hwaddr addr, unsigned size);
+void cup2006_mbx_trace_reg(Cup2006MachineState *s, const char *dir, hwaddr off,
+                           uint64_t value);
+void cup2006_mbx_ack_redeliver(Cup2006MachineState *s, int was_asserted);
+void cup2006_mbx_late_boundary(Cup2006MachineState *s, uint32_t old_enable,
+                               uint32_t new_enable);
 void cup2006_mbx_ta_frame(Cup2006MachineState *s);
-void cup2006_mbx_update_irq(Cup2006MachineState *s, const char *why);
+void cup2006_mbx_update_irq(Cup2006MachineState *s, const char *why, int req);
 /* machine/cup2006-mbx3d.c: the vendored PowerVR MBX1 model (MIT). */
 void cup2006_mbx3d_init(Cup2006MachineState *s);
 void cup2006_mbx3d_reset(Cup2006MachineState *s);

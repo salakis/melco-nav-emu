@@ -1424,6 +1424,49 @@ static void cup2006_init(MachineState *machine)
      * MBX/3DG register window, always on; both aliases are mapped so the log
      * names the address the guest used (the driver uses 0x1D000000). */
     s->mbx_window = g_new0(uint32_t, CUP2006_MBX_SIZE / 4);
+    /*
+     * Diagnostic experiment switch, off by default: the shipped sense is
+     * the mask reading.  "enable" reads +0x130 as the hardware's enable
+     * (master bit 15 gates the line); "enable-nomaster" ignores that gate.
+     */
+    s->mbx_sense = CUP2006_MBX_SENSE_MASK;
+    if (g_strcmp0(getenv("CUP2006_MBX_SENSE"), "enable") == 0) {
+        s->mbx_sense = CUP2006_MBX_SENSE_ENABLE;
+    } else if (g_strcmp0(getenv("CUP2006_MBX_SENSE"),
+                         "enable-nomaster") == 0) {
+        s->mbx_sense = CUP2006_MBX_SENSE_ENABLE_NOMASTER;
+    }
+    /*
+     * Candidate experiment, off by default: re-assert the 0x900 source on
+     * an INTC2 acknowledge while the MBX line is still up.  "once" is the
+     * one-shot-per-edge candidate, "always" the bounded control that shows
+     * the re-entry an unbounded rule produces, and "late" the diagnostic
+     * pulse on the far side of the guest's +0x130 disarm (see
+     * cup2006_mbx_late_boundary(); not a hardware fix).
+     */
+    s->mbx_redeliver = CUP2006_MBX_REDELIVER_OFF;
+    if (g_strcmp0(getenv("CUP2006_MBX_REDELIVER"), "once") == 0) {
+        s->mbx_redeliver = CUP2006_MBX_REDELIVER_ONCE;
+    } else if (g_strcmp0(getenv("CUP2006_MBX_REDELIVER"), "always") == 0) {
+        s->mbx_redeliver = CUP2006_MBX_REDELIVER_ALWAYS;
+    } else if (g_strcmp0(getenv("CUP2006_MBX_REDELIVER"), "late") == 0) {
+        s->mbx_redeliver = CUP2006_MBX_REDELIVER_LATE;
+    } else if (g_strcmp0(getenv("CUP2006_MBX_REDELIVER"), "late-first") == 0) {
+        s->mbx_redeliver = CUP2006_MBX_REDELIVER_LATE_FIRST;
+    }
+    /*
+     * Diagnostic filter, off by default: withhold the 0x900 delivery of the
+     * first one ("first") or the first two ("both") standalone MBX completion
+     * requests - pending status exactly bit 6, 0x40 - without touching the
+     * status register, the enable word or W1C.  Needs mbx3d and the enable
+     * sense; inert under the shipped mask reading (see cup2006-du.c).
+     */
+    s->mbx_evm_quiet = CUP2006_MBX_EVM_QUIET_OFF;
+    if (g_strcmp0(getenv("CUP2006_MBX_EVM_QUIET"), "first") == 0) {
+        s->mbx_evm_quiet = CUP2006_MBX_EVM_QUIET_FIRST;
+    } else if (g_strcmp0(getenv("CUP2006_MBX_EVM_QUIET"), "both") == 0) {
+        s->mbx_evm_quiet = CUP2006_MBX_EVM_QUIET_BOTH;
+    }
     if (s->mbx3d_requested) {
         if (s->carmarker) {
             warn_report("cup2006: carmarker=on draws a host-side marker over "

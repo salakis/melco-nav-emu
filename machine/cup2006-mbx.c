@@ -16,6 +16,9 @@ static void cup2006_mbx_write(Cup2006MachineState *s, hwaddr base,
     uint32_t mask = size == 4 ? 0xffffffffu : ((1u << (size * 8)) - 1);
     uint32_t *slot = &s->mbx_window[off >> 2];
     uint32_t old = *slot;
+    uint32_t old_enable = s->mbx_window[CUP2006_MBX_ENABLE >> 2];
+
+    cup2006_mbx_trace_reg(s, "write", off, value);
 
     /*
      * With the MBX1 model present (mbx3d=on) it decodes the window, including
@@ -25,6 +28,15 @@ static void cup2006_mbx_write(Cup2006MachineState *s, hwaddr base,
      */
     if (s->mbx3d) {
         cup2006_mbx3d_write(s, off, value, size);
+        /*
+         * Diagnostic only, off unless CUP2006_MBX_REDELIVER=late: after the
+         * model's own level callbacks for this write have run, give the
+         * late-boundary experiment the +0x130 value before and after.
+         */
+        if (off == CUP2006_MBX_ENABLE) {
+            cup2006_mbx_late_boundary(s, old_enable,
+                                      s->mbx_window[CUP2006_MBX_ENABLE >> 2]);
+        }
         cup2006_mbx_note(s, phys, true, size, value);
         return;
     }
@@ -134,7 +146,15 @@ static void cup2006_mbx_write(Cup2006MachineState *s, hwaddr base,
         cup2006_mbx_update_irq(s, off == CUP2006_MBX_ENABLE ? "enable" :
                                off == CUP2006_MBX_STATUS_ACK ? "ack" :
                                off == CUP2006_MBX_SURFACE_END ? "arm" :
-                               "status-write");
+                               "status-write", -1);
+    }
+    /*
+     * Diagnostic only, off unless CUP2006_MBX_REDELIVER=late: the latch
+     * model runs its render completion inside this same write, so the hook
+     * goes after the update above and reports the status the write left.
+     */
+    if (off == CUP2006_MBX_ENABLE) {
+        cup2006_mbx_late_boundary(s, old, *slot);
     }
     cup2006_mbx_note(s, phys, true, size, value);
     qemu_log_mask(LOG_GUEST_ERROR,
