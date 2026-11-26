@@ -50,15 +50,30 @@ void cup2006_mbx_note(Cup2006MachineState *s, hwaddr phys,
  * raise is its instant completion at driver-init time (t=1.5 s), which the
  * driver answers by polling.
  *
- * It is not the MBX that needs the line.  The boot that reaches the map gets
- * there through a phantom raise: at 71.29 s the driver writes 0x7fbb,
- * disabling bits 2 and 6, a mask reads that as enabling them, and the code
- * the resulting interrupt unblocks starts the first +0x680 render.  So 0x900
- * is advancing the display pipeline, and whatever event the guest is waiting
- * for there, this model does not deliver it; the sense stays until it does.
- * Measured on both paths: with the enable sense the latch path stops on the
- * disclaimer and mbx3d=1 never reaches the 3D map, against a map screen and
- * a 3D destination screen as it stands.
+ * The handler behind it is this device's own.  It reads +0x12C and acks bits
+ * through +0x134.  The compositing that carries the boot along is delivered
+ * by other sources: on a normal boot the 2D engine's 0x8C0 asserts 130 times
+ * for 130 jobs from 3.85 s and the display unit's 0x780 in the same run, with
+ * no INTC2 source disabled or left unenabled in between.
+ *
+ * What the line is missing is events.  The bits below are raised when the
+ * guest reads +0x12C: a TA run "finishes" at the first status read after an
+ * ack, a render completes with bits 2 and 6 at once.  The core in machine/mbx/
+ * raises them where they happen instead - I_RENDER 0x4, I_ISP 0x8 and
+ * I_EVM_DALLOC 0x40 with the render's completion, I_TA_DONE 0x10 at the end of
+ * the TA stream, I_TA_CONTEXT 0x100 on the context writes at +0x814 and
+ * +0x818, the free list at +0x838 for the direct allocate.  A bit made up at
+ * a status read has no timing to be wrong about, which is why it cannot stand
+ * in for those.
+ *
+ * The boot that reaches the map gets there through a phantom raise: at
+ * 71.29 s the driver kicks the render at +0x680, writes 0x7fbb to +0x130 with
+ * bits 2 and 6 pending, a mask reads that as enabling them, and the code the
+ * resulting interrupt unblocks is the guest's 0x900 handler.  So the sense is
+ * load-bearing only because the events are missing: read as the hardware has
+ * it and without those events, the boot is instruction-identical to 71.29 s
+ * and then stops on the disclaimer, and with mbx3d=1 the same sense stops the
+ * 3D map.  Both hold until the events exist.
  */
 static uint32_t cup2006_mbx_active_status(Cup2006MachineState *s)
 {

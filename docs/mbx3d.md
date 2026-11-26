@@ -51,13 +51,24 @@ bits 16-23 are the input FIFO's fill. The line is level-sensitive: up while
 `+0x130 & 0x8000` and `+0x12C & +0x130`.
 
 The line the latch model drives is not this one. It reads `+0x130` the other
-way round, as a mask, and that sense is load-bearing: the map screen depends
-on the phantom raise it produces at 71 s, because the guest's 0x900 handler is
-what starts the display pipeline. With `mbx3d=on` the glue recomputes the
-model's level through the same rule, and for the same reason — handing the
-model's own level to the controller instead stops the 3D map. `cup2006-du.c`
-has the measurement and what would have to be modelled before either can be
-corrected.
+way round, as a mask, and that sense is load-bearing: the guest's `0x900`
+handler is the MBX's own — it reads `+0x12C` and acks through `+0x134` — and
+at 71 s the only raise that reaches it is a phantom the mask produces. With
+`mbx3d=on` the glue recomputes the model's level through the same rule;
+handing the model's own level to the controller instead stops the 3D map.
+`cup2006-du.c` has the measurement and what would have to be modelled before
+either can be corrected.
+
+What the core does at that boundary is visible in a 3D run, in this order:
+`line=1 status=0x4c enable=0xffffffff`, then `line=0 status=0x4c
+enable=0xffff7fbb` — status still pending, the line gone because that write
+also clears master bit 15 — then `0xffffffff` written back from the poll loop,
+`line=1` again into the handler, `+0x134 = 0x4c`, and status reads back `0`.
+Two things follow. The firmware does ack bit 3: `0x4C` is `I_RENDER | I_ISP |
+I_EVM_DALLOC`, so the bit-0 livelock the model's completion note warns about
+does not apply to this driver. And the wait write clears the master bit, so a
+master-gated level drops while the completion is still pending — delivery
+across that write, not the ack, is what a corrected model has to get right.
 
 ## Watching it
 
