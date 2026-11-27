@@ -12,7 +12,11 @@ of a process whose window is hidden, fully occluded or on another Space, and
 the guest then sees virtual time stretch against the host: a first power-on
 measured in seconds of guest time becomes unpredictable minutes.  The activity
 is taken for the life of the process, because the board models have no idle
-state to declare.
+state to declare: the token that beginActivityWithOptions: returns is retained
+once into a file-scope static and never released.  Nothing here builds with
+-fobjc-arc, so without that retain the returned object would be autoreleased
+into the pool cocoa_display_init() drains, and App Nap ends the activity when
+its token is deallocated.
 
 The window sizing is a second, visual defect on a Retina host: divide by
 backingScaleFactor and a 400x234 panel is laid out in device pixels, so it
@@ -38,21 +42,37 @@ This does not change any device model, so it cannot alter what the guest sees.
          [[self window] center];
      } else if ([[self window] styleMask] & NSWindowStyleMaskFullScreen) {
          [[self window] setContentSize:[self fixAspectRatio:[self screenSafeAreaSize]]];
-@@ -1973,6 +1972,17 @@
-     TransformProcessType(&psn, kProcessTransformToForegroundApplication);
+@@ -1961,6 +1960,14 @@
+     });
+ }
+ 
++/*
++ * The App Nap activity taken in cocoa_display_init(). App Nap ends the activity
++ * when its token is deallocated; there is no ARC here, so the token comes back
++ * autoreleased into the pool cocoa_display_init() drains and has to be retained
++ * and never released to keep the activity alive for the life of the process.
++ */
++static id appNapActivity;
++
+ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+ {
+     NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
+@@ -1974,6 +1981,18 @@
  
      [QemuApplication sharedApplication];
-+
+ 
 +    /*
 +     * Opt out of App Nap. Both machines run their firmware against the host
 +     * clock and a boot is measured in guest time, so a hidden or occluded
-+     * window must not have its timers coalesced. The activity is never ended:
-+     * it lasts as long as the process.
++     * window must not have its timers coalesced. The token is retained into
++     * appNapActivity, which nothing releases: see its declaration.
 +     */
-+    (void)[[NSProcessInfo processInfo]
-+              beginActivityWithOptions:NSActivityUserInitiated |
-+                                         NSActivityLatencyCritical
-+                                reason:@"emulating hardware in real time"];
- 
++    appNapActivity =
++        [[[NSProcessInfo processInfo]
++           beginActivityWithOptions:NSActivityUserInitiated |
++                                    NSActivityLatencyCritical
++                             reason:@"emulating hardware in real time"] retain];
++
      // Create an Application controller
      QemuCocoaAppController *controller = [[QemuCocoaAppController alloc] init];
+     [NSApp setDelegate:controller];
