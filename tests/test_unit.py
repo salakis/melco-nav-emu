@@ -202,3 +202,107 @@ def test_prepare_lands_the_eeprom_part_number(tmp_path):
     unit.prepare(u, "cup2006")
     after = (u / "eeprom.bin").read_bytes()
     assert after == bytes(image)
+
+
+# A part's own identity, as a production part carries it: five packed-BCD
+# bytes ("0512345678") and a three-byte suffix, which is not the placeholder.
+REAL_PART_NUMBER = bytes.fromhex("0512345678") + b" AB"
+
+
+def test_a_real_eeprom_part_number_is_left_alone(
+        tmp_path, no_power_on, capsys):
+    """A unit that carries its own identity keeps it, and silently: only an
+    erased field is seeded, as machine/cup28.c does for its backup EEPROM
+    (the rule CUP28's documented "keeps whatever a unit already holds" is
+    about, so the twin model behaves the same)."""
+    u = tmp_path / "u"
+    u.mkdir()
+    eeprom = u / "eeprom.bin"
+    image = bytearray(b"\xff" * cup2006.EEPROM_BYTES)
+    image[cup2006.EEPROM_PART_OFFSET:120] = REAL_PART_NUMBER
+    eeprom.write_bytes(bytes(image))
+    unit.prepare(u, "cup2006")
+    assert eeprom.read_bytes() == bytes(image)      # byte for byte
+    assert "eeprom" not in capsys.readouterr().err   # and no warning on a boot
+
+
+def test_an_erased_eeprom_part_number_is_seeded(tmp_path, no_power_on):
+    """An erased part (0xFFFF on every word) gets the placeholder, so the
+    guest's About screen need not show "??????????ÿÿÿ"; the unit's own words
+    are kept."""
+    u = tmp_path / "u"
+    u.mkdir()
+    eeprom = u / "eeprom.bin"
+    image = bytearray(b"\xff" * cup2006.EEPROM_BYTES)
+    image[0x17] = 0x0c                    # a word the driver wrote: kept
+    eeprom.write_bytes(bytes(image))
+    unit.prepare(u, "cup2006")
+    expected = (bytes(image[:cup2006.EEPROM_PART_OFFSET]) +
+                cup2006.EEPROM_PART_NUMBER +
+                bytes(image[cup2006.EEPROM_PART_OFFSET + 8:]))
+    assert eeprom.read_bytes() == expected
+
+
+def test_a_unit_without_an_eeprom_gets_the_whole_chip(tmp_path, no_power_on):
+    """A new unit gets the whole 128-byte chip the machine loads and saves,
+    erased apart from the part number."""
+    u = tmp_path / "u"
+    u.mkdir()
+    unit.prepare(u, "cup2006")
+    image = (u / "eeprom.bin").read_bytes()
+    assert len(image) == cup2006.EEPROM_BYTES
+    assert image[112:120] == cup2006.EEPROM_PART_NUMBER
+    assert image[:112] == b"\xff" * 112 and image[120:] == b"\xff" * 8
+
+
+def test_a_short_eeprom_is_padded_to_the_whole_chip(tmp_path, no_power_on):
+    """The machine reads a short file as a short chip (its missing words read
+    erased), so the seed writes all 128 bytes, not just up to the end of the
+    part number: the rest is erased, and what the file held is kept."""
+    u = tmp_path / "u"
+    u.mkdir()
+    eeprom = u / "eeprom.bin"
+    kept = bytes(range(0x40))             # words 0-31, as the driver left them
+    eeprom.write_bytes(kept)
+    unit.prepare(u, "cup2006")
+    image = eeprom.read_bytes()
+    assert len(image) == cup2006.EEPROM_BYTES
+    assert image[:0x40] == kept
+    assert image[0x40:112] == b"\xff" * (112 - 0x40)
+    assert image[112:120] == cup2006.EEPROM_PART_NUMBER
+    assert image[120:] == b"\xff" * 8
+
+
+def test_an_oversized_eeprom_is_cut_to_the_chip(tmp_path, no_power_on):
+    """The machine reads and saves exactly 128 bytes, so a longer file's tail
+    is not part of the chip: a seed writes the chip, not the stray tail."""
+    u = tmp_path / "u"
+    u.mkdir()
+    eeprom = u / "eeprom.bin"
+    eeprom.write_bytes(b"\xff" * 200)
+    unit.prepare(u, "cup2006")
+    image = eeprom.read_bytes()
+    assert len(image) == cup2006.EEPROM_BYTES
+    assert image[112:120] == cup2006.EEPROM_PART_NUMBER
+
+
+def test_a_failed_eeprom_save_keeps_the_old_image(
+        tmp_path, monkeypatch, capsys, no_power_on):
+    """A save that cannot be renamed into place reports and leaves the old
+    file intact, as machine/cup2006-subcpu.c's save does, rather than raising
+    halfway or leaving the temporary behind."""
+    u = tmp_path / "u"
+    u.mkdir()
+    eeprom = u / "eeprom.bin"
+    erased = b"\xff" * cup2006.EEPROM_BYTES
+    eeprom.write_bytes(erased)
+
+    def full(_src, _dst):
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(cup2006.os, "replace", full)
+    unit.prepare(u, "cup2006")            # reports, does not raise
+    assert eeprom.read_bytes() == erased
+    assert not (u / "eeprom.bin.tmp").exists()
+    err = capsys.readouterr().err
+    assert "eeprom" in err and "No space left" in err

@@ -426,19 +426,45 @@ EEPROM_PART_NUMBER = bytes(5) + b" AA"         # "0000000000 AA"
 
 
 def seed_eeprom_part_number(unit: Path) -> None:
-    """Land the unit's part number in its EEPROM image, in the order the
-    driver reads it back in (machine/cup2006-subcpu.c: a word goes out low
-    byte first, and the eight bytes sit at 112-119 of eeprom.bin)."""
+    """Give the unit's EEPROM image a part number, in the order the driver
+    reads it back in (machine/cup2006-subcpu.c: a word goes out low byte
+    first, and the eight bytes sit at 112-119 of eeprom.bin).
+
+    Only an erased field is seeded (all 0xFF, as a factory part reads), so a
+    unit that already carries a real identity keeps it: the same rule the
+    CUP28 machine applies to its own backup EEPROM's version field
+    (machine/cup28.c, cup28_bkeeprom_init: the placeholder lands only while
+    the field still compares equal to the erased value).
+
+    The image is written whole to "<path>.tmp" and renamed over the old file,
+    as the machine's own save does (cup2006_eeprom_save): a failed or
+    interrupted write then leaves the old image rather than a short one,
+    which the driver would load back as erased.  A short file's missing
+    words read erased, so it is padded to the chip's 128 bytes first.
+    """
     eeprom = Path(unit) / "eeprom.bin"
     image = (bytearray(eeprom.read_bytes()) if eeprom.is_file()
              else bytearray(b"\xff" * EEPROM_BYTES))
+    if len(image) < EEPROM_BYTES:
+        image.extend(b"\xff" * (EEPROM_BYTES - len(image)))
+    del image[EEPROM_BYTES:]                # the chip is these 128 bytes only
     end = EEPROM_PART_OFFSET + len(EEPROM_PART_NUMBER)
-    if len(image) < end:
-        image.extend(b"\xff" * (end - len(image)))
-    if bytes(image[EEPROM_PART_OFFSET:end]) == EEPROM_PART_NUMBER:
-        return                                  # already landed
+    erased = b"\xff" * len(EEPROM_PART_NUMBER)      # what a factory part reads
+    if bytes(image[EEPROM_PART_OFFSET:end]) != erased:
+        return                          # a real identity: keep the unit's own
     image[EEPROM_PART_OFFSET:end] = EEPROM_PART_NUMBER
-    eeprom.write_bytes(bytes(image))
+    tmp = eeprom.with_name(eeprom.name + ".tmp")
+    try:
+        tmp.write_bytes(bytes(image))
+        os.replace(tmp, eeprom)
+    except OSError as exc:
+        try:
+            tmp.unlink()             # as in C: a failed unlink is ignored
+        except OSError:
+            pass
+        print("cup2006: WARNING: cannot save the EEPROM part number in %s: %s."
+              "  The unit's EEPROM is left as it was; the About screen shows "
+              "the erased part." % (eeprom, exc), file=sys.stderr)
 
 
 def prepare_unit(unit: Path) -> None:
