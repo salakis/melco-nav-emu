@@ -150,6 +150,25 @@ def _hdd_problem(board: str, media: dict) -> Optional[str]:
     return boards.get(board).hdd_map_problem(media["hdd"])
 
 
+def _check_label(label: str) -> str:
+    """The run's label, once it is known to name one plain directory.
+
+    A label becomes a directory directly under OUT_BASE, so a label that is
+    only dots steps out of it: ".." makes the output directory build/, whose
+    unit/ is the real CU-P2006 unit, and _fresh_unit() would replace it.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", label) or not label.strip("."):
+        raise SystemExit("bootcheck: --label must be [A-Za-z0-9._-]+ and not "
+                         "only dots")
+    return label
+
+
+def _under(path: Path, root: Path) -> bool:
+    """Whether path resolves to a strict descendant of root."""
+    path, root = path.resolve(), root.resolve()
+    return root in path.parents
+
+
 def _fresh_unit(outdir: Path, unit_arg: Optional[str], board: str) -> Path:
     if unit_arg:
         unit = Path(unit_arg)
@@ -158,6 +177,12 @@ def _fresh_unit(outdir: Path, unit_arg: Optional[str], board: str) -> Path:
         unit.mkdir(parents=True, exist_ok=True)
         return unit
     unit = outdir / "unit"
+    # Belt and braces behind _check_label(): whatever the label or a symlink
+    # under OUT_BASE did, only this run's own directory may be replaced.
+    if not _under(unit.parent, OUT_BASE):
+        raise SystemExit(
+            "bootcheck: refusing to replace the unit at %s: it is not inside "
+            "the bootcheck output root %s" % (unit, OUT_BASE))
     if unit.exists():
         shutil.rmtree(unit)
     template = TEMPLATE / board / "unit"
@@ -274,9 +299,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     disc = args.disc or defaults["disc"]
     scenario = args.scenario or defaults["scenario"]
     icount = args.icount if args.icount is not None else defaults["icount"]
-    label = args.label
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", label):
-        raise SystemExit("bootcheck: --label must be [A-Za-z0-9._-]+")
+    label = _check_label(args.label)
 
     outdir = OUT_BASE / label
     outdir.mkdir(parents=True, exist_ok=True)

@@ -1,9 +1,24 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Copyright (c) 2026 melco-nav-emu contributors
-"""bootcheck compare(): two hand-written result directories, no QEMU."""
+"""bootcheck compare(): two hand-written result directories, no QEMU.
+
+The `run` tests stop at the label check or at _fresh_unit(): a real run
+needs a QEMU build and a disc, and must never touch build/.
+"""
 import json
 
+import pytest
+
 from melco_nav_emu import bootcheck
+
+
+def _sandbox(tmp_path, monkeypatch):
+    """Point the output root and the unit template at tmp_path, so that
+    nothing can read or replace the real build/bootcheck or build/unit."""
+    base = tmp_path / "build" / "bootcheck"
+    monkeypatch.setattr(bootcheck, "OUT_BASE", base)
+    monkeypatch.setattr(bootcheck, "TEMPLATE", base / "template")
+    return base
 
 
 def _write_run(base, label, *, board="cup28", milestones=None, shots=None,
@@ -130,3 +145,111 @@ def test_run_events_pauses_at_virtual_times():
     assert ("screendump", "shot-1.5.ppm") in qmp.calls
     key = [a for c, a in qmp.calls if c == "send-key"][0]
     assert key["keys"] == [{"type": "qcode", "data": "ret"}]
+
+
+def test_label_must_be_one_plain_directory_name():
+    for label in (".", "..", "...", "a/b", "../x", "/etc", "a b", ""):
+        with pytest.raises(SystemExit):
+            bootcheck._check_label(label)
+    # The documented labels still pass, including one that merely has dots.
+    for label in ("a..b", "run-1", "f6-final-eu", "x.y_z", "9"):
+        assert bootcheck._check_label(label) == label
+
+
+def test_missing_label_is_a_usage_error():
+    with pytest.raises(SystemExit) as excinfo:
+        bootcheck.main(["run", "--board", "cup2006"])
+    assert excinfo.value.code == 2
+
+
+@pytest.mark.parametrize("label", ["..", ".", "..."])
+def test_dot_label_never_reaches_a_unit_outside_the_root(tmp_path, monkeypatch,
+                                                         label):
+    base = _sandbox(tmp_path, monkeypatch)
+    # ".." makes the output directory build/, so this is the real build/unit.
+    outside = base.parent / "unit"
+    outside.mkdir(parents=True)
+    (outside / "hdd.img").write_bytes(b"unit-owned")
+    monkeypatch.setattr(bootcheck, "_qemu_running", lambda: False)
+
+    def stop(*args):
+        raise SystemExit("bootcheck: test stopped before the board")
+
+    # A run from here on needs a QEMU build and a disc, so it must not get
+    # there: a hostile label is refused by the argument check instead.
+    monkeypatch.setattr(bootcheck, "_board_argv", stop)
+    with pytest.raises(SystemExit) as excinfo:
+        bootcheck.main(["run", "--board", "cup2006", "--label", label])
+    # Nothing outside the output root was touched, and the refusal came from
+    # the argument check rather than from a later failure.
+    assert (outside / "hdd.img").read_bytes() == b"unit-owned"
+    assert not (base / "unit").exists()
+    assert "--label" in str(excinfo.value)
+
+
+def test_fresh_unit_refuses_to_delete_outside_the_output_root(tmp_path,
+                                                              monkeypatch):
+    base = _sandbox(tmp_path, monkeypatch)
+    base.mkdir(parents=True)
+    outside = base.parent / "unit"
+    outside.mkdir()
+    (outside / "hdd.img").write_bytes(b"unit-owned")
+
+    # The belt-and-braces guard, for a label or a symlink that slipped past
+    # the argument check.
+    with pytest.raises(SystemExit) as excinfo:
+        bootcheck._fresh_unit(base / "..", None, "cup2006")
+    assert "output root" in str(excinfo.value)
+    assert (outside / "hdd.img").read_bytes() == b"unit-owned"
+
+
+def test_a_label_containing_dots_replaces_only_its_own_unit(tmp_path,
+                                                            monkeypatch):
+    base = _sandbox(tmp_path, monkeypatch)
+    template = base / "template" / "cup2006" / "unit"
+    template.mkdir(parents=True)
+    (template / "sram.bin").write_bytes(b"blank")
+    sibling = base / "other" / "unit"
+    sibling.mkdir(parents=True)
+    (sibling / "flash.img").write_bytes(b"keep")
+    outside = base.parent / "unit"
+    outside.mkdir()
+    (outside / "hdd.img").write_bytes(b"keep")
+
+    outdir = base / "a..b"
+    unit = bootcheck._fresh_unit(outdir, None, "cup2006")
+    assert unit == outdir / "unit"
+    assert [p.name for p in unit.iterdir()] == ["sram.bin"]   # from TEMPLATE
+    assert (sibling / "flash.img").read_bytes() == b"keep"
+    assert (outside / "hdd.img").read_bytes() == b"keep"
+
+
+def test_a_stale_unit_inside_the_root_is_replaced(tmp_path, monkeypatch):
+    base = _sandbox(tmp_path, monkeypatch)
+    template = base / "template" / "cup28" / "unit"
+    template.mkdir(parents=True)
+    (template / "flash.bin").write_bytes(b"blank")
+    unit = base / "run" / "unit"
+    unit.mkdir(parents=True)
+    (unit / "flash.bin").write_bytes(b"used")
+
+    assert bootcheck._fresh_unit(base / "run", None, "cup28") == unit
+    assert (unit / "flash.bin").read_bytes() == b"blank"
+    # No template for cup2006: the unit is just created empty.
+    other = bootcheck._fresh_unit(base / "run2", None, "cup2006")
+    assert other.is_dir() and not any(other.iterdir())
+
+
+def test_explicit_unit_is_used_as_given_and_never_deleted(tmp_path,
+                                                          monkeypatch):
+    base = _sandbox(tmp_path, monkeypatch)
+    monkeypatch.setattr(bootcheck, "ROOT", tmp_path)
+    kept = tmp_path / "my-unit"
+    kept.mkdir()
+    (kept / "hdd.img").write_bytes(b"unit-owned")
+
+    # --unit is the caller's own directory, even outside the output root: it
+    # is reused, never replaced, and a relative one is relative to ROOT.
+    assert bootcheck._fresh_unit(base / "run", str(kept), "cup2006") == kept
+    assert bootcheck._fresh_unit(base / "run", "my-unit", "cup2006") == kept
+    assert (kept / "hdd.img").read_bytes() == b"unit-owned"
