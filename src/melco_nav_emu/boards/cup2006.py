@@ -357,35 +357,55 @@ DEFAULT_UNIT = UNIT
 
 
 # The guest's APM (map-install) backup areas start with this ASCII version
-# date, followed by two records.  Flash holds three such areas (0x1e40800,
-# 0x1e80800, 0x1ec0800); battery RAM holds one, at 0x40800, which
-# corresponds to the first flash area.  The status checks below read that
-# pair.
+# date, followed by two records.  Battery RAM holds one, at 0x40800 (the one a
+# production board's guest reads); a flash image holds several, and their
+# offsets differ between images: the checked-in unit's flash has them at
+# 0x1e00800 and 0x1ec0800, where scripts/apm_record_seed.py expects 0x1e40800,
+# 0x1e80800, 0x1ec0800.  So a flash image's areas are found by their date
+# header, never assumed of a fixed address.
 APM_DATE = b"20080207"
-FLASH_APM_AREA = 0x1e40800    # first APM area in flash
+FLASH_BACKUP = 0x1c00000      # a flash image keeps its backup areas in its
+                              # top 4 MiB, as scripts/apm_record_seed.py does
 BKRAM_APM_AREA = 0x40800      # the APM area in battery RAM (the one the
                               # guest reads on a production board)
 RECORD = 0x540                # record stride; body at area + 0x10 + n * RECORD
 MAPDWLSTS = 0x370             # install-status byte in the record body
+AREA_BYTES = 0x10 + 2 * RECORD  # a whole area: its date header and records
 
 
 def _dwl_sts(path, area):
     path = Path(path)
     if not path.is_file():
         return None
-    want = 0x10 + 2 * RECORD
     with open(path, "rb") as f:
         f.seek(area)
-        data = f.read(want)
-    if len(data) < want or data[:8] != APM_DATE:
+        data = f.read(AREA_BYTES)
+    if len(data) < AREA_BYTES or data[:8] != APM_DATE:
         return None
     return [data[0x10 + n * RECORD + MAPDWLSTS] for n in (0, 1)]
 
 
+def _flash_apm_area(path):
+    """Offset of the lowest APM area a flash image holds, or None if it holds
+    no whole one: found by its date header, as scripts/apm_record_seed.py does,
+    so the answer does not depend on an image's particular layout."""
+    path = Path(path)
+    if not path.is_file():
+        return None
+    data = path.read_bytes()
+    off = data.find(APM_DATE, FLASH_BACKUP if len(data) > FLASH_BACKUP else 0)
+    while off != -1:
+        if len(data) - off >= AREA_BYTES:      # the image holds both records
+            return off
+        off = data.find(APM_DATE, off + 1)
+    return None
+
+
 def map_dwl_sts(flash):
     """Install status of both records of the first APM area in flash, or
-    None if the area is not guest-formatted."""
-    return _dwl_sts(flash, FLASH_APM_AREA)
+    None if the flash holds no guest-formatted area."""
+    area = _flash_apm_area(flash)
+    return None if area is None else _dwl_sts(flash, area)
 
 
 def bkram_dwl_sts(bkram):

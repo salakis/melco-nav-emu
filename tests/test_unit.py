@@ -21,6 +21,11 @@ def _format_apm(data, area, status=99):
         data[area + 0x10 + n * cup2006.RECORD + cup2006.MAPDWLSTS] = status
 
 
+# One flash APM area, as scripts/apm_record_seed.py names it; the checked-in
+# unit keeps its areas at 0x1e00800 and 0x1ec0800 instead.
+FLASH_APM_AREA = 0x1e40800
+
+
 def _fail(msg):
     raise AssertionError(msg)
 
@@ -50,7 +55,7 @@ def test_prepare_leaves_a_guest_written_factory_record_alone(tmp_path, no_power_
     flash = u / "flash.img"
     data = bytearray(flash.read_bytes())
     # The guest has formatted its APM area and recorded an install in progress.
-    _format_apm(data, cup2006.FLASH_APM_AREA)
+    _format_apm(data, FLASH_APM_AREA)
     flash.write_bytes(bytes(data))
     unit.prepare(u, "cup2006")
     assert flash.read_bytes() == bytes(data)
@@ -74,7 +79,7 @@ def test_prepare_relands_the_completed_install_record(tmp_path, no_power_on):
     assert (u / ".installed").exists()
     # And again on the next boot (the guest rewrote 99 in between).
     data = bytearray(flash.read_bytes())
-    _format_apm(data, cup2006.FLASH_APM_AREA)
+    _format_apm(data, FLASH_APM_AREA)
     flash.write_bytes(bytes(data))
     unit.prepare(u, "cup2006")
     assert cup2006.map_dwl_sts(flash) == [0, 0]
@@ -132,6 +137,51 @@ def test_status_of_a_short_or_missing_store_is_none(tmp_path):
     data[cup2006.BKRAM_APM_AREA:cup2006.BKRAM_APM_AREA + 8] = cup2006.APM_DATE
     bkram.write_bytes(bytes(data))
     assert cup2006.bkram_dwl_sts(bkram) is None
+
+
+def test_flash_status_finds_the_area_wherever_it_sits(tmp_path):
+    """A flash image does not carry its APM areas at fixed offsets: the
+    checked-in unit has them at 0x1e00800 and 0x1ec0800, not at the area
+    scripts/apm_record_seed.py starts from."""
+    for area in (0x1e00800, 0x1ec0800):
+        flash = tmp_path / ("%x.img" % area)
+        data = bytearray(b"\xff" * (32 << 20))
+        _format_apm(data, area, status=3)
+        flash.write_bytes(bytes(data))
+        assert cup2006.map_dwl_sts(flash) == [3, 3]
+
+
+def test_flash_status_of_the_lowest_area_is_reported(tmp_path):
+    flash = tmp_path / "flash.img"
+    data = bytearray(b"\xff" * (32 << 20))
+    _format_apm(data, 0x1e00800, status=7)
+    _format_apm(data, 0x1ec0800, status=8)
+    flash.write_bytes(bytes(data))
+    assert cup2006.map_dwl_sts(flash) == [7, 7]
+
+
+def test_flash_status_without_an_apm_area_is_none(tmp_path):
+    flash = tmp_path / "flash.img"
+    flash.write_bytes(b"\xff" * (32 << 20))
+    assert cup2006.map_dwl_sts(flash) is None
+    data = bytearray(flash.read_bytes())
+    data[0x1e00800:0x1e00808] = b"20061226"   # another backup area's date
+    flash.write_bytes(bytes(data))
+    assert cup2006.map_dwl_sts(flash) is None
+
+
+def test_prepare_refreshes_a_stale_record_in_any_flash_area(
+        tmp_path, no_power_on):
+    """The flash record is refreshed in the area the image keeps it in, so a
+    stale status there is re-landed rather than left behind."""
+    u = tmp_path / "u"
+    u.mkdir()
+    flash = u / "flash.img"
+    data = bytearray(b"\xff" * (32 << 20))
+    _format_apm(data, 0x1e00800)       # install in progress in the unit's area
+    flash.write_bytes(bytes(data))
+    unit.prepare(u, "cup2006")
+    assert cup2006.map_dwl_sts(flash) == [0, 0]
 
 
 def test_prepare_lands_the_eeprom_part_number(tmp_path):
