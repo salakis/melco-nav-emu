@@ -92,7 +92,9 @@ struct rstate {
 	uint32_t at;		/* alpha test, environment colour */
 	uint32_t tex[2][3];	/* texture words A, B, C a unit */
 	uint32_t w4, layout, w6;
-	float vp[4];		/* x scale, x offset, y offset, y scale */
+	float vp[4];		/* the viewport block's first four words: x scale, x offset,
+				 * y offset, y scale. The block is six words; hdr_block (ta.c)
+				 * drops the last two rather than store them past this bound */
 	float dz[3];		/* depth scale, offset, the unit of the offset (1e-5) */
 	uint32_t stream[3];	/* VGP stream-out: address (ignored), selects, enable */
 };

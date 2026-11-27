@@ -949,7 +949,16 @@ static void hdr_block(struct mbxemu *e, uint32_t v)
 	case 4: s->w4 = v; break;
 	case 5: s->layout = v; break;
 	case 6: s->w6 = v; break;
-	case 7: s->vp[w] = u2f(v); break;
+	case 7:
+		/* The viewport block is six words, measured as (0, 1, 0, 1, 0, 1): project()
+		 * takes the first four, the last two have no use here. Past vp[] they land
+		 * on dz[0] and dz[1] (a scale of 0, an offset of 1), and a 3D vertex with a
+		 * finite z/w gets a depth of exactly 1.0: a strict less-than test against a
+		 * tile cleared to 1.0 rejects it, less-or-equal accepts it (render.c:
+		 * depth_pass, zclear) */
+		if (w < 4)
+			s->vp[w] = u2f(v);
+		break;
 	case 8: s->dz[w] = u2f(v); break;
 	default: s->stream[e->hdr_bit - 9] = v; break;
 	}
